@@ -11,8 +11,9 @@ Two channels from the same reviewed source:
 | Dev | Zen Dev | com.kimkhoi.zen.dev | ~/Library/Application Support/Zen Personal/Dev |
 | Production | Zen | com.kimkhoi.zen | ~/Library/Application Support/Zen Personal/Production |
 
-The existing vendor app is a fallback until development testing and promotion.
-No script in this repository overwrites it or imports credentials automatically.
+The vendor app and original profile are preserved outside Git for rollback.
+The user accepted the personal changes for production on 2026-10-26. See
+[Production.md](Production.md) for current installation and verification status.
 Browser profiles, cookies, vaults, signing keys and local auth never belong in Git.
 
 ## First build: released engine plus custom UI
@@ -21,7 +22,7 @@ The initial personal build reuses the correctly signed official 1.23.4b engine
 and repackages source-controlled frontend modules. It is not a full Firefox
 compile. This retains the vendor's native engine and avoids its large build
 footprint. The resulting apps are locally signed with the owner's Developer ID;
-no certificate private key is uploaded to GitHub. The original app stays intact.
+no certificate private key is uploaded to GitHub. The original vendor app stays intact in its private backup location.
 
 The internal Gecko application ID remains the upstream compatibility ID.
 The bundle ID, remoting identity, app name and forced profile distinguish the
@@ -43,8 +44,8 @@ It does not copy browsing history, cookies, logins, vault state or extensions.
 Run Node tests, then build with an existing local signing identity:
 
     node --test scripts/personal/site_search.test.mjs
-    python3 scripts/personal/build_macos.py --channel dev --identity 'Developer ID Application: Your Name (TEAMID)'
-    python3 scripts/personal/build_macos.py --channel production --identity 'Developer ID Application: Your Name (TEAMID)'
+    python3 scripts/personal/build_macos.py --base '/path/to/official/Zen.app' --channel dev --identity 'Developer ID Application: Your Name (TEAMID)'
+    python3 scripts/personal/build_macos.py --base '/path/to/official/Zen.app' --channel production --identity 'Developer ID Application: Your Name (TEAMID)'
 
 Artifacts and machine manifests are under ignored `dist/`. They start as
 packaged candidates, not tested production releases. The current archive format
@@ -56,10 +57,11 @@ hashes, and the modified resource archive hash. Keep it with the candidate.
 See [the initial native verification record](Verification.md) for completed
 checks and the integration work still needed before daily use.
 
-The first Dev app is installed at `/Applications/Zen Dev.app`. The production
-candidate stays in `dist/production-candidate/Zen.app`; it has not replaced
-`/Applications/Zen.app`. Dev is signed out and has no migrated extensions.
-Both channels can run alongside the vendor browser, using their own profiles.
+Zen Dev is installed at `/Applications/Zen Dev.app`; the main custom channel
+uses `/Applications/Zen.app`. Each has its own forced profile. Dev is signed out
+and has no copied extensions. The production profile is a verified copy of the
+closed original daily profile, with app/profile path metadata rebased. The source
+profile is retained unchanged; this is a copy, not a move.
 
 ## Changes
 
@@ -81,7 +83,8 @@ or off and clears when leaving search mode.
 ## Updating and promotion
 
 Keep personal changes on `personal/dev`; `personal/production` identifies the
-reviewed production source and stays at the upstream base until user acceptance.
+reviewed production source. The user has accepted the personal.2 features;
+personal.3 also resolves launcher paths so bundled browser components initialize.
 Fetch upstream release tags and merge the selected
 release into a temporary update branch. Review source/patch conflicts, change
 the pin in channels.json, rebuild both artifacts and repeat the native checks.
@@ -138,3 +141,15 @@ to a full-source build. See Zen's official contribution/build documentation.
 
 The first task is to establish the lightweight tested artifact workflow, not
 to claim a successfully compiled native engine that has not been compiled.
+
+## Closed-profile copy tool
+
+`clone_profile.py --source SOURCE --destination NEW_PROFILE --backup NEW_BACKUP`
+refuses running/locked profiles and existing destinations, checks database
+integrity without writing SQLite bookkeeping files, verifies a full backup and
+copy by SHA-256, rebases only path metadata, and compares counts. It never
+exports/decrypts credentials. Reports and full snapshots contain private browser
+data and must stay outside Git. `--resume-verified-backup` accepts only an intact,
+byte-identical pre-clone snapshot left by an interrupted check. Synthetic tests
+cover source preservation, uncheckpointed databases, corrupt backups and
+refusal to overwrite existing profiles.

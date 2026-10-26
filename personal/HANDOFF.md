@@ -31,6 +31,9 @@ has not been performed. See [README.md](README.md) and [Verification.md](Verific
 | `scripts/personal/ui_patch.py` | Exact-anchor native Tab-handler overlay shared by both build paths |
 | `scripts/personal/build_macos.py` | Checks the official base, repackages UI, creates identities/launcher, signs, records manifest |
 | `scripts/personal/apply_to_engine.py` | Applies the native Tab overlay after full engine import |
+| `scripts/personal/clone_profile.py` | Back up and copy a closed daily profile into a new isolated production profile |
+| `scripts/personal/jsonlz4.py` | Dependency-free Mozilla profile/session codec |
+| `scripts/personal/*_test.py` | Synthetic profile-copy safety and native macOS launcher regression checks |
 | `scripts/personal/seed_dev_profile.py` | Explicitly copies only search aliases and keyboard registry into closed Dev |
 | `personal/launcher.c` | Forces per-channel app ini and isolated profile; runs the native engine |
 | `personal/channels.json` | Upstream pin, personal revision, app names, bundle/remoting IDs and profiles |
@@ -49,6 +52,7 @@ git status --short
 git branch --show-current
 git worktree list
 node --test scripts/personal/*.test.mjs
+python3 -m unittest discover -s scripts/personal -p '*_test.py'
 node --check src/zen/urlbar/PersonalSiteSearch.mjs
 node --check src/zen/urlbar/ZenUrlbarController.mjs
 python3 -m py_compile scripts/personal/*.py
@@ -68,7 +72,7 @@ is public, its private key stays in the keychain. Pick a new output directory:
 
 ```sh
 python3 scripts/personal/build_macos.py \
-  --base /Applications/Zen.app \
+  --base "/path/to/preserved/official/Zen.app" \
   --channel dev \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
   --output dist/dev-next
@@ -108,40 +112,41 @@ Use the explicit desired base branch; keep feature changes focused. Commit and
 push to `origin`, the personal fork. Upstream's push URL is disabled. Never commit
 an unrelated branch's work or force-push shared release history.
 
-## Updates, promotion, and remaining work
+## Accepted production source and updates
 
-`personal.2` extends the command registry and defaults to the native top-toolbar
-layout. See [Arc Commands.md](Arc%20Commands.md) for the inspected Arc inventory,
-supported actions, cache semantics and native verification. Its runtime source is
-`0f3231e7d9b50de74d112fa2deed8a6285ae20dd`; the tested candidate is
-`dist/commands-candidate/Zen Dev.app`, now installed at `/Applications/Zen Dev.app`.
-Older candidates below remain historical; consult each candidate's own manifest.
+The user accepted personal.2 on 2026-10-26. Production now contains the accepted
+commands/search/layout code. A startup check found that the launcher must resolve
+its application.ini path before passing it to Gecko: parent segments caused
+URLPreloader to miss the built-in-addon manifest. personal.3 fixes that path;
+all six bundled components reappear in Dev's startup registry. No builtin assets
+or security checks were removed or overridden. The native macOS launcher test
+executes the real C launcher against a synthetic engine and checks canonical
+paths, profile isolation and rejected profile overrides.
 
-The runtime implementation commit is
-`2ae841dda57eaef058632044b864d813d007f63a`. Installed apps have not been rebuilt
-merely because later handoff/documentation commits exist.
+The personal.3 packaged runtime source is
+`5ff99997dc1be5546231d7eccf83d40f52f9c05a`, tagged `personal-1.23.4b.3`.
+See [Production.md](Production.md) for promotion evidence and remaining checks,
+and [Arc Commands.md](Arc%20Commands.md) for the 50-test command implementation
+and previous Dev smoke tests. Later tooling/documentation commits do not imply
+that installed apps have been rebuilt.
 
-`personal/production` remains upstream commit
-`541ee55196395ee8082862b83c84c90ab41d9f6d`. This baseline contains neither the
-personal implementation nor these packaging scripts yet. The existing signed
-production candidate was generated from the development implementation commit,
-not from the production branch. It has not been native tested or promoted.
-
-After the user's Dev acceptance, fast-forward the Production worktree to the
-accepted revision, tag it, and rebuild the production identity. Back up the
-closed daily browser/profile, copy the profile to the separate Production
-directory, and verify bookmarks, workspaces, tabs, extensions and sign-ins before
-switching the daily app. Keep the original app and profile backup for rollback.
-Never test or downgrade directly against the daily profile.
-
-Before promotion, verify real sites, extensions, 1Password trusted-browser
-integration, passkeys, DRM playback, native messaging and external link handling.
-Local signature verification does not establish Apple notarization. Dev currently
-has search aliases/shortcuts only and is otherwise signed out.
+The installed main app is our custom production identity, not a release signed
+or published by the Zen team. The vendor app and original profile are preserved
+outside Git. Dev remains isolated and signed out. Build future candidates from
+a verified official base app, never from the customized `/Applications/Zen.app`.
+The parent workspace handoff contains the local official-base/backup paths.
 
 For upstream updates, fetch tags, merge the selected release into an update
-branch based on `personal/dev`, review conflicts and overlay anchors, update the
-pin, obtain the matching official base, rebuild, test, and promote. The custom
-apps disable upstream automatic binary updates; no custom updater or scheduled
-monitor exists. Security releases need prompt manual rebuild/promotion. Leave
-the inherited upstream release workflows disabled in this fork.
+branch based on personal/dev, review conflicts and overlay anchors, update the
+pin, obtain the matching official base, rebuild, test Dev, then promote that
+source to personal/production. Preserve the previous app and closed-profile
+snapshot for rollback. Never downgrade a live profile in place.
+
+The custom apps disable upstream automatic binary updates; no custom updater or
+scheduled monitor exists. Security releases need prompt manual rebuilding and
+promotion. Leave inherited upstream release workflows disabled in this fork.
+
+1Password needs its actual browser integration checked for the production
+signing identity. Passkeys, DRM playback, native messaging and OS link routing
+remain separate integration checks; a copied cookie database or valid signature
+does not prove them. The app is Developer-ID signed but not Apple notarized.

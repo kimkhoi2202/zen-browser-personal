@@ -18,12 +18,18 @@ Source mapping:
 - scripts/personal/apply_to_engine.py: controller overlay after full source import.
 - personal/README.md: design, limitations, updating and promotion instructions.
 - personal/HANDOFF.md: continuation guide, source map, commands and release state.
+- scripts/personal/clone_profile.py: explicit closed-profile backup/copy and private verification report.
+- scripts/personal/jsonlz4.py: Mozilla JSONLZ4 codec for metadata/session rebasing.
+- scripts/personal/profile_test.py: synthetic migration failure and preservation checks.
+- scripts/personal/launcher_test.py: compiles the real launcher against a synthetic engine on macOS.
+- personal/Production.md: release source, migration evidence and remaining integration checks.
 - scripts/personal/seed_dev_profile.py: optional search/shortcut-only Dev seed.
 
 Build output apps/manifests stay in ignored dist/. Code signing uses an existing
 local keychain identity passed at invocation; no keys/passwords are saved here.
-The original /Applications/Zen.app and browser profiles must remain intact
-until the custom app passes testing and an intentional backed-up promotion.
+The original vendor app and source profile must remain intact in their private
+backup/source locations. Do not use the customized /Applications/Zen.app as the
+base for a later artifact build. The parent workspace handoff records paths.
 
 Only use app-scoped CUA for native testing. No global Computer/AppleScript or
 browser-debugging connection. Run code/file tools for source and packaging.
