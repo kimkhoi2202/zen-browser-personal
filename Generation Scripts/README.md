@@ -14,6 +14,8 @@ Source mapping:
 - scripts/personal/site_search.test.mjs: meaningful module tests.
 - scripts/personal/apply_to_engine.py: controller overlay after full source import.
 - personal/README.md: design, limitations, updating and promotion instructions.
+- personal/HANDOFF.md: continuation guide, source map, commands and release state.
+- scripts/personal/seed_dev_profile.py: optional search/shortcut-only Dev seed.
 
 Build output apps/manifests stay in ignored dist/. Code signing uses an existing
 local keychain identity passed at invocation; no keys/passwords are saved here.

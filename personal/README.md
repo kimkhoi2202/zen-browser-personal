@@ -1,5 +1,9 @@
 # Personal Zen
 
+For another agent continuing this project, start with [HANDOFF.md](HANDOFF.md).
+The local source workspace is now `~/Documents/Zen Browser`, with `Development`
+and `Production` as separate Git worktrees.
+
 Two channels from the same reviewed source:
 
 | Channel | App | Bundle ID | Profile |
