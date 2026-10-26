@@ -23,6 +23,8 @@ jobs:
           node-version: '22'
       - name: Test actual custom search module and channel separation
         run: node --test scripts/personal/*.test.mjs
+      - name: Verify profile-copy safety with synthetic data
+        run: python3 -m unittest discover -s scripts/personal -p '*_test.py'
       - name: Parse native modules and packaging scripts
         run: |
           node --check src/zen/urlbar/PersonalSiteSearch.mjs
