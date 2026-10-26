@@ -8,7 +8,8 @@ Zen's existing global-action registry/provider, localized labels, native result
 rows, shortcut display and browser commands are reused. There is no second
 command palette or new visual framework. Normal search and configured site-search
 modes remain available. A complete command or a literal prefix identifying just
-one command can be the default result; ambiguous prefixes keep normal search.
+one command can be the default result without prior usage. Ambiguous prefixes
+retain Zen's existing learned ranking and the normal search option.
 
 ## Added commands
 
@@ -54,4 +55,39 @@ screenshots, print, settings and extension actions remain available.
 The focused suite has 50 tests covering command matching, ambiguous prefixes,
 page/disabled-state availability, native DevTools dispatch/policy, visibility
 combinations and the existing keyword/badge behaviors. Actual native smoke-test
-results are recorded separately after testing the signed build.
+results are recorded below for the signed `personal.2` build.
+
+### Native results — 2026-10-26
+
+Runtime source: `0f3231e7d9b50de74d112fa2deed8a6285ae20dd`.
+Installed Dev matches `dist/commands-candidate/Zen Dev.app`; the previous installed
+app is retained in `dist/previous-installed-2026-10-26/Zen Dev.app`.
+
+- The native top toolbar is enabled in Dev and is the packaged default.
+- Command-T → Zoom In → Enter changed native zoom to 110%; Zoom Out returned to
+  100%; `zoom to` selected Zoom to Actual Size and returned a zoomed page to 100%.
+- `clear` selected Clear Cache and Refresh. The loopback fixture fetched resource
+  response 2 instead of response 1, with its cookie and local storage still kept.
+- Force Refresh the Page selected the existing Reload Tab Without Cache action
+  and fetched response 3, preserving the same synthetic state.
+- Hide/Show Toolbar and Hide/Show Sidebar worked independently, including hiding
+  both and showing the toolbar while keeping the sidebar hidden. Both were restored.
+- Use Sidebar Address Bar switched layouts; Use Top Toolbar restored the top bar.
+- Inspect Elements opened native Inspector. JavaScript Console and Network
+  Inspector selected their native panels. Developer Tools reopened the native
+  toolbox. No script was executed through the developer console.
+- Save Page As opened the native save dialog and was cancelled. View Source
+  opened the source tab, which was closed. Downloads and History opened their
+  corresponding Zen Library views.
+- `y` → Tab still entered YouTube search. Typing Zoom In inside that mode remained
+  a YouTube search rather than executing a browser command. Empty Tab still opened
+  the native Actions mode.
+
+Copy URL as Markdown, Full Screen and Reader View use native mappings and their
+availability checks; their effects were not exercised in this native smoke test.
+Full-screen testing was avoided while the user was using the computer.
+
+The loopback-only fixture is reproducible with
+`python3 scripts/personal/command_fixture.py`. It prints a temporary local URL.
+It contains synthetic state only and no accounts or external services. Stop the
+server when done. The actual user's signed-in pages were not refreshed or cleared.

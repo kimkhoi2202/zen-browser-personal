@@ -1,5 +1,8 @@
 # Initial verification — 2026-10-25
 
+For the updated `personal.2` command/toolbar build and its 50-test suite, see
+[Arc Commands.md](Arc%20Commands.md). The initial build record below is historical.
+
 Base: upstream Zen 1.23.4b, commit `541ee55196395ee8082862b83c84c90ab41d9f6d`.
 Artifacts reuse the official native engine with modified frontend modules;
 no full Firefox/C++ compilation was performed.

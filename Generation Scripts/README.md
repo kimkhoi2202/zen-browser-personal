@@ -8,6 +8,7 @@ Source mapping:
 - src/zen/urlbar/PersonalSiteSearch.mjs: exact alias activation and badge colors.
 - src/zen/urlbar/PersonalCommandActions.mjs: native command descriptors and matching.
 - scripts/personal/commands.test.mjs: native action, visibility and matching checks.
+- scripts/personal/command_fixture.py: loopback page for native zoom/cache tests.
 - src/zen/urlbar/ZenUrlbarController.mjs: native search-mode/theme integration.
 - scripts/personal/ui_patch.py: shared native controller injection.
 - scripts/personal/build_macos.py: reproducible signed macOS artifact creation.

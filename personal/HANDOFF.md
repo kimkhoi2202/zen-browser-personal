@@ -112,8 +112,10 @@ an unrelated branch's work or force-push shared release history.
 
 `personal.2` extends the command registry and defaults to the native top-toolbar
 layout. See [Arc Commands.md](Arc%20Commands.md) for the inspected Arc inventory,
-supported actions, cache semantics and verification. Older candidates below
-remain historical; consult each new candidate's own Build Manifest.json.
+supported actions, cache semantics and native verification. Its runtime source is
+`0f3231e7d9b50de74d112fa2deed8a6285ae20dd`; the tested candidate is
+`dist/commands-candidate/Zen Dev.app`, now installed at `/Applications/Zen Dev.app`.
+Older candidates below remain historical; consult each candidate's own manifest.
 
 The runtime implementation commit is
 `2ae841dda57eaef058632044b864d813d007f63a`. Installed apps have not been rebuilt
