@@ -3,6 +3,9 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/.
    -->
+> **Personal Zen fork:** [Dev and production setup, building, updates, and promotion](personal/README.md).
+> This fork adds Tab-to-search and colored provider badges. It is not an official Zen release.
+
 <!-- TODO: Get a job -->
 <img src="./docs/assets/zen-dark.svg" width="100px" align="left">
 

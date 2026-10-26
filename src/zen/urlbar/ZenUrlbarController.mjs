@@ -3,6 +3,10 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import { UrlbarShared } from "chrome://browser/content/urlbar/UrlbarShared.mjs";
+import {
+  applyProviderBadge,
+  installProviderBadgeStyles,
+} from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";
 
 const SEARCH_MODE_ANIMATION_RESET_MS = 1000;
 
@@ -38,6 +42,7 @@ export class nsZenUrlbarController {
   }
 
   init() {
+    installProviderBadgeStyles(document);
     const { registerZenUrlbarProviders } = ChromeUtils.importESModule(
       "resource:///modules/ZenUBProvider.sys.mjs"
     );
@@ -304,6 +309,7 @@ export class nsZenUrlbarController {
   // Section: search mode
 
   #onSearchModeChanged(event) {
+    applyProviderBadge(gURLBar, event.detail.searchMode);
     if (gReduceMotion) {
       return;
     }

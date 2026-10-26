@@ -1,0 +1,46 @@
+name: Personal Zen checks
+on:
+  push:
+    branches: ['personal/**']
+  pull_request:
+    branches: ['personal/dev']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: personal-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    if: github.repository == 'kimkhoi2202/zen-browser-personal'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test actual custom search module and channel separation
+        run: node --test scripts/personal/site_search.test.mjs
+      - name: Parse native modules and packaging scripts
+        run: |
+          node --check src/zen/urlbar/PersonalSiteSearch.mjs
+          node --check src/zen/urlbar/ZenUrlbarController.mjs
+          python3 -m py_compile scripts/personal/*.py
+      - name: Verify clean patch anchor behavior
+        run: |
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0,'scripts/personal')
+          from ui_patch import patch_controller
+          sample='export class UrlbarChildController {\n      case KeyEvent.DOM_VK_TAB: {\n'
+          changed=patch_controller(sample)
+          assert 'getKeywordTabEngine(this.input, this.view, event)' in changed
+          try:
+              patch_controller(changed)
+          except RuntimeError:
+              pass
+          else:
+              raise AssertionError('Duplicate application must fail')
+          PY
