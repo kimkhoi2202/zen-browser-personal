@@ -3,6 +3,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
+import {
+  ARC_ACTION_ALIASES,
+  personalCommandActions,
+} from "resource:///modules/zen/urlbar/PersonalCommandActions.mjs";
 
 const lazy = {};
 
@@ -34,6 +38,7 @@ function isNotEmptyTab(window) {
 }
 
 const globalActionsTemplate = [
+  ...personalCommandActions(Services),
   {
     l10nId: "zen-action-toggle-compact-mode",
     command: "cmd_zenCompactModeToggle",
@@ -361,6 +366,7 @@ export function labelFor(l10nId) {
 }
 
 export const globalActions = globalActionsTemplate.map(action => ({
+  aliases: ARC_ACTION_ALIASES[action.l10nId] || [],
   isAvailable: window => {
     return (
       window.document

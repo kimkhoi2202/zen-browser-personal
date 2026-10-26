@@ -10,6 +10,10 @@ import {
   labelFor,
 } from "resource:///modules/ZenUBGlobalActions.sys.mjs";
 import { zenUrlbarResultsLearner } from "./ZenUBResultsLearner.sys.mjs";
+import {
+  actionSearchTerms,
+  preferredActionForQuery,
+} from "resource:///modules/zen/urlbar/PersonalCommandActions.mjs";
 
 const lazy = {};
 
@@ -157,6 +161,17 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
    * @param {UrlbarQueryContext} queryContext The query context object
    */
   async isActive(queryContext) {
+    // An engine-scoped search must keep searching that engine, even when the
+    // search terms happen to be a browser command such as "zoom in".
+    if (
+      queryContext.searchMode &&
+      ![
+        UrlbarShared.RESULT_SOURCE.WORKSPACES,
+        UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS,
+      ].includes(queryContext.searchMode.source)
+    ) {
+      return false;
+    }
     return (
       queryContext.searchMode?.source ==
         UrlbarShared.RESULT_SOURCE.WORKSPACES ||
@@ -259,8 +274,11 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
         results.push({ action, score: 100 });
         continue;
       }
-      const label = action.extraPayload?.prettyName || action.label;
-      const score = this.#calculateFuzzyScore(label, query);
+      const score = Math.max(
+        ...actionSearchTerms(action).map(term =>
+          this.#calculateFuzzyScore(term, query)
+        )
+      );
       if (
         score >
         (isPrefixed ? MINIMUM_PREFIXED_QUERY_SCORE : MINIMUM_QUERY_SCORE)
@@ -348,7 +366,10 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
   }
 
   async startQuery(queryContext, addCallback) {
-    const query = queryContext.trimmedLowerCaseSearchString;
+    const query = queryContext.trimmedLowerCaseSearchString.replace(
+      /\s+/gu,
+      " "
+    );
     const isWorkspaceSearch =
       queryContext.searchMode?.source == UrlbarShared.RESULT_SOURCE.WORKSPACES;
     const isPrefixed =
@@ -369,6 +390,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     }
 
     const ownerGlobal = lazy.BrowserWindowTracker.getTopWindow();
+    const preferredAction = preferredActionForQuery(actionsResults, query);
     let finalResults = [];
     for (const action of actionsResults) {
       const { payload, payloadHighlights } = payloadAndSimpleHighlights([], {
@@ -393,7 +415,9 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
       });
 
       const shouldBePrioritized =
-        zenUrlbarResultsLearner.shouldPrioritize(action.commandId) &&
+        (action === preferredAction ||
+          (!preferredAction &&
+            zenUrlbarResultsLearner.shouldPrioritize(action.commandId))) &&
         !isPrefixed;
       let result = new lazy.UrlbarResult({
         type: UrlbarShared.RESULT_TYPE.DYNAMIC,

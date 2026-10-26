@@ -63,6 +63,10 @@ Both channels can run alongside the vendor browser, using their own profiles.
 
 ## Changes
 
+`personal.2` adds [Arc-style native commands](Arc%20Commands.md) and defaults to
+Zen's existing Sidebar and Top Toolbar layout. The command rows, browser actions,
+compact-mode behavior, localization and settings UI are Zen's existing components.
+
 Bare Tab on an exact configured search alias enters that engine's native search
 mode. User-typed text wins over autocomplete. Unknown aliases, an already
 selected lower suggestion, modifier combinations, existing search mode and

@@ -23,6 +23,9 @@ has not been performed. See [README.md](README.md) and [Verification.md](Verific
 | File | Role |
 |---|---|
 | `src/zen/urlbar/PersonalSiteSearch.mjs` | Exact alias detection, provider colors, badge styles |
+| `src/zen/urlbar/PersonalCommandActions.mjs` | Arc aliases, missing native actions, toolbar/sidebar visibility and command matching |
+| `src/zen/urlbar/ZenUBGlobalActions.sys.mjs` | Adds the personal commands to Zen's existing registry |
+| `src/zen/urlbar/ZenUBActionsProvider.sys.mjs` | Searches aliases and prioritizes unambiguous commands in native result rows |
 | `src/zen/urlbar/ZenUrlbarController.mjs` | Installs styles; applies them when native search mode changes |
 | `src/zen/urlbar/moz.build` | Registers the custom module for full source imports |
 | `scripts/personal/ui_patch.py` | Exact-anchor native Tab-handler overlay shared by both build paths |
@@ -32,7 +35,7 @@ has not been performed. See [README.md](README.md) and [Verification.md](Verific
 | `personal/launcher.c` | Forces per-channel app ini and isolated profile; runs the native engine |
 | `personal/channels.json` | Upstream pin, personal revision, app names, bundle/remoting IDs and profiles |
 | `personal/entitlements.plist` | Local signing entitlement baseline |
-| `scripts/personal/site_search.test.mjs` | 36 focused module/channel tests |
+| `scripts/personal/*.test.mjs` | 50 focused command/module/channel tests |
 | `.github/workflows/personal-checks.yml` | Lightweight tests/syntax/patch-anchor CI |
 | `Generation Scripts/README.md` | Generation-script mapping and continuation context |
 
@@ -45,7 +48,7 @@ secrets and signed apps do not belong in source control.
 git status --short
 git branch --show-current
 git worktree list
-node --test scripts/personal/site_search.test.mjs
+node --test scripts/personal/*.test.mjs
 node --check src/zen/urlbar/PersonalSiteSearch.mjs
 node --check src/zen/urlbar/ZenUrlbarController.mjs
 python3 -m py_compile scripts/personal/*.py
@@ -106,6 +109,11 @@ push to `origin`, the personal fork. Upstream's push URL is disabled. Never comm
 an unrelated branch's work or force-push shared release history.
 
 ## Updates, promotion, and remaining work
+
+`personal.2` extends the command registry and defaults to the native top-toolbar
+layout. See [Arc Commands.md](Arc%20Commands.md) for the inspected Arc inventory,
+supported actions, cache semantics and verification. Older candidates below
+remain historical; consult each new candidate's own Build Manifest.json.
 
 The runtime implementation commit is
 `2ae841dda57eaef058632044b864d813d007f63a`. Installed apps have not been rebuilt

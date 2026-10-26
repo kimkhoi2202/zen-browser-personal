@@ -6,6 +6,8 @@ eventual daily use, keyword-plus-Tab search and provider-colored badges.
 
 Source mapping:
 - src/zen/urlbar/PersonalSiteSearch.mjs: exact alias activation and badge colors.
+- src/zen/urlbar/PersonalCommandActions.mjs: native command descriptors and matching.
+- scripts/personal/commands.test.mjs: native action, visibility and matching checks.
 - src/zen/urlbar/ZenUrlbarController.mjs: native search-mode/theme integration.
 - scripts/personal/ui_patch.py: shared native controller injection.
 - scripts/personal/build_macos.py: reproducible signed macOS artifact creation.

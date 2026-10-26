@@ -22,6 +22,12 @@ CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
 CONTROLLER='chrome/browser/content/browser/urlbar/UrlbarChildController.mjs'
 ZEN_CONTROLLER='modules/zen/urlbar/ZenUrlbarController.mjs'
 HELPER='modules/zen/urlbar/PersonalSiteSearch.mjs'
+ADDITIONAL_UI={
+    'modules/zen/urlbar/PersonalCommandActions.mjs':'src/zen/urlbar/PersonalCommandActions.mjs',
+    'modules/ZenUBGlobalActions.sys.mjs':'src/zen/urlbar/ZenUBGlobalActions.sys.mjs',
+    'modules/ZenUBActionsProvider.sys.mjs':'src/zen/urlbar/ZenUBActionsProvider.sys.mjs',
+    'localization/en-US/browser/zen-command-palette.ftl':'locales/en-US/browser/browser/zen-command-palette.ftl',
+}
 
 def run(*cmd,**kwargs):return subprocess.run([str(x) for x in cmd],check=True,**kwargs)
 
@@ -32,7 +38,8 @@ def source_metadata():
     dirty=bool(subprocess.check_output(['git','status','--porcelain'],cwd=ROOT,text=True).strip())
     paths=['src/zen/urlbar/PersonalSiteSearch.mjs','src/zen/urlbar/ZenUrlbarController.mjs',
            'scripts/personal/ui_patch.py','personal/launcher.c','personal/channels.json',
-           'personal/entitlements.plist','scripts/personal/build_macos.py']
+           'personal/entitlements.plist','scripts/personal/build_macos.py','prefs/zen/view.yaml',
+           *ADDITIONAL_UI.values()]
     return {'commit':revision,'dirty':dirty,'file_sha256':{p:sha(ROOT/p) for p in paths}}
 
 def extract_archive(archive,directory):
@@ -86,6 +93,12 @@ def build(base,channel,identity,output):
         (extracted/CONTROLLER).write_text(patch_controller(original))
         (extracted/ZEN_CONTROLLER).write_bytes((ROOT/'src/zen/urlbar/ZenUrlbarController.mjs').read_bytes())
         (extracted/HELPER).write_bytes((ROOT/'src/zen/urlbar/PersonalSiteSearch.mjs').read_bytes())
+        for destination,source in ADDITIONAL_UI.items():
+            (extracted/destination).write_bytes((ROOT/source).read_bytes())
+        defaults=extracted/'defaults/preferences/firefox.js'
+        prefs=defaults.read_text();anchor='pref("zen.view.use-single-toolbar", true);'
+        if prefs.count(anchor)!=1:raise RuntimeError('Review upstream toolbar default before packaging')
+        defaults.write_text(prefs.replace(anchor,'pref("zen.view.use-single-toolbar", false);'))
         package_archive(extracted,archive)
     plist_path=app/'Contents/Info.plist'
     plist=plistlib.loads(plist_path.read_bytes())

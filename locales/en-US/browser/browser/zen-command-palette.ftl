@@ -43,3 +43,25 @@ zen-action-print = Print
 zen-action-focus-on = Focus on
 zen-action-extension = Extension
 zen-action-open = Open
+
+# Personal fork additions use the existing Zen command result and native actions.
+zen-action-personal-zoom-in = Zoom In
+zen-action-personal-zoom-out = Zoom Out
+zen-action-personal-actual-size = Zoom to Actual Size
+zen-action-personal-clear-cache = Clear Cache and Refresh
+zen-action-personal-copy-markdown = Copy URL as Markdown
+zen-action-personal-save-page = Save Page As
+zen-action-personal-view-source = View Source
+zen-action-personal-downloads = Open Downloads
+zen-action-personal-history = Open History
+zen-action-personal-fullscreen = Toggle Full Screen
+zen-action-personal-reader = Toggle Reader View
+zen-action-personal-sidebar-urlbar = Use Sidebar Address Bar
+zen-action-personal-show-toolbar = Show Toolbar
+zen-action-personal-hide-toolbar = Hide Toolbar
+zen-action-personal-show-sidebar = Show Sidebar
+zen-action-personal-hide-sidebar = Hide Sidebar
+zen-action-personal-developer-tools = Developer Tools
+zen-action-personal-inspector = Inspect Elements
+zen-action-personal-console = JavaScript Console
+zen-action-personal-network = Network Inspector

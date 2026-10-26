@@ -22,11 +22,14 @@ jobs:
         with:
           node-version: '22'
       - name: Test actual custom search module and channel separation
-        run: node --test scripts/personal/site_search.test.mjs
+        run: node --test scripts/personal/*.test.mjs
       - name: Parse native modules and packaging scripts
         run: |
           node --check src/zen/urlbar/PersonalSiteSearch.mjs
           node --check src/zen/urlbar/ZenUrlbarController.mjs
+          node --check src/zen/urlbar/PersonalCommandActions.mjs
+          node --check src/zen/urlbar/ZenUBGlobalActions.sys.mjs
+          node --check src/zen/urlbar/ZenUBActionsProvider.sys.mjs
           python3 -m py_compile scripts/personal/*.py
       - name: Verify clean patch anchor behavior
         run: |
