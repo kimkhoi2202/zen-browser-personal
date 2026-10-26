@@ -59,24 +59,33 @@ are in the parent workspace's HANDOFF.md and the private backup reports.
   verification. The red YouTube badge and native search scope were observed.
 - All 50 JavaScript tests and 5 macOS Python safety/launcher tests pass locally.
   Linux CI skips only the native macOS compilation test.
-- The main `/Applications/Zen.app` currently contains the initial personal.2
-  production package and runs the copied Production profile. Its signature,
-  profile isolation and 13 installed extensions were verified from local state.
-- The signed personal.3 production fix is ready but **must replace personal.2
-  only after main Zen exits**. The user has been asked to quit main Zen normally.
-- The UI tool's app catalogue still resolves `/Applications/Zen.app` to the old
-  vendor bundle, and rejects `com.kimkhoi.zen` as invalid even though the new
-  process appears in inventory. Broad Computer permission and LaunchServices
-  registration did not refresh that catalogue. Do not change the app identity or
-  use OS scripting to work around the UI tool. Refresh/restart the host tool
-  session if necessary.
+- Main `/Applications/Zen.app` now contains the clean personal.3 production
+  package. It launched with a canonical ini path and the isolated Production
+  profile. Local startup state confirms 6 bundled components plus 13 installed
+  extensions; no old-profile addon paths remain.
+- Before replacement, the closed current Production profile was copied and
+  fingerprint-verified again, and the prior personal.2 app was retained.
+- The original vendor profile remains byte-identical to its promotion snapshot.
+- Both branch checks passed for the prior handoff revision:
+  [Dev](https://github.com/kimkhoi2202/zen-browser-personal/actions/runs/40404456893)
+  and [Production](https://github.com/kimkhoi2202/zen-browser-personal/actions/runs/40404457974).
+- The UI tool still cannot attach to the new main identity: its cached path
+  resolves to the vendor bundle. Re-registering the installed app in LaunchServices
+  establishes the correct system registration but does not refresh the tool's
+  catalogue. Do not alter bundle IDs or use OS scripting to bypass this issue.
 
-Production is not yet declared ready for daily use. After installing personal.3,
-verify its canonical launch arguments, 6 bundled plus 13 installed components,
-restored workspaces/tabs, keyword-Tab, native commands and the actual 1Password
-popup. Check OS default-browser routing. Request action-time approval if adding
-the new signing identity to 1Password's trusted browsers is necessary. Passkey,
-DRM and all-site sign-in parity have not been demonstrated.
+The app is installed and running. Full production UI/1Password verification is
+pending the tool catalogue refresh. macOS's current http/https defaults still
+reference the old vendor bundle. System Settings shows only a duplicate-name
+Zen choice, so no ambiguous default change was made. Use the custom browser's
+own General > Make Default action, then verify the new handler is com.kimkhoi.zen
+and resolves to /Applications/Zen.app. Restarting the host/tool session may be
+needed to expose its new app identity.
+
+Check the actual 1Password popup, requesting action-time approval if this
+signing identity needs trusted-browser access. Passkeys, DRM and all-site sign-in
+parity have not been demonstrated. The copied profile preserves data; it does
+not guarantee that a server will keep every session valid.
 
 ## Continuing updates
 
