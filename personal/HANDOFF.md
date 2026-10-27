@@ -13,9 +13,11 @@ rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
 The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
 dev changes were deliberately excluded. Both architectures are packaged; only
 Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
-Installed Zen (Dev) is personal.6 as well. Copy URL is now on the right, before
-site controls, with the existing spacing unchanged. See Production.md for the
-1Password trust refresh and the remaining next-lock Touch ID check.
+Installed Zen (Dev) is now a signed personal.7 responsive extension-list preview;
+see [Add-ons Layout.md](Add-ons%20Layout.md) for source and exact verification limits.
+Prod/public stay personal.6. Copy URL is on the right, before site controls, with
+spacing unchanged. See Production.md for the 1Password trust refresh and the
+remaining next-lock Touch ID check.
 
 ## Goal and implementation
 
