@@ -133,14 +133,21 @@ def build(base,channel,identity,output):
     existing.write_text(json.dumps(policy,indent=2)+'\n')
     macos=app/'Contents/MacOS'
     (macos/'zen').rename(macos/'zen-engine')
-    run('clang','-O2','-Wall','-Wextra','-Werror',f'-DPERSONAL_CHANNEL="{settings["profileDirectory"]}"',
+    architectures=subprocess.check_output(['lipo','-archs',str(macos/'zen-engine')],text=True).split()
+    if not architectures or set(architectures)-{'arm64','x86_64'}:
+        raise RuntimeError('Unsupported macOS engine architectures')
+    arch_flags=[flag for architecture in architectures for flag in ('-arch',architecture)]
+    run('clang',*arch_flags,f'-mmacosx-version-min={base_info.get("LSMinimumSystemVersion", "11.0")}','-O2','-Wall','-Wextra','-Werror',f'-DPERSONAL_CHANNEL="{settings["profileDirectory"]}"',
         ROOT/'personal/launcher.c','-o',macos/'zen-personal')
-    run('codesign','--force','--deep','--sign',identity,'--options','runtime','--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
+    if set(subprocess.check_output(['lipo','-archs',str(macos/'zen-personal')],text=True).split())!=set(architectures):
+        raise RuntimeError('Launcher and engine architectures differ')
+    run('codesign','--force','--deep','--sign',identity,'--options','runtime','--timestamp','--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
     run('codesign','--verify','--deep','--strict',app,capture_output=True)
     report={'status':'packaged-and-signature-verified','channel':channel,'app':str(app),
             'bundle_id':settings['bundleId'],'profile_directory':'~/Library/Application Support/Zen Personal/'+settings['profileDirectory'],
             'upstream':CONFIG['upstream'],'source':source_metadata(),
             'engine':'official released engine; frontend modules customized',
+            'architectures':architectures,'minimum_macos':base_info.get('LSMinimumSystemVersion','11.0'),
             'base_archive_sha256':original_archive_sha,'modified_archive_sha256':sha(archive),
             'native_tested':False,'promoted':False,'auto_updates':'disabled for custom channel; rebuild from new upstream release',
             'signing':'local keychain identity; no private key exported','identity_fingerprint':identity}

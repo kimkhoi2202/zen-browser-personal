@@ -12,6 +12,10 @@ Source mapping:
 - src/zen/urlbar/ZenUrlbarController.mjs: native search-mode/theme integration.
 - scripts/personal/ui_patch.py: shared native controller injection.
 - scripts/personal/build_macos.py: reproducible signed macOS artifact creation.
+- scripts/personal/release_macos.py: local preparation, notarization, DMG generation, checksum verification and GitHub release upload; see personal/Releasing.md.
+- scripts/personal/release_test.py: rejects accidental profile/key payloads and escaping bundle links.
+- personal/Public Release.md: Read Me bundled in the public disk image.
+- personal/Release Notes.md: release description uploaded with each tagged package.
 - personal/launcher.c: native app/profile isolation launcher.
 - personal/entitlements.plist: local signing entitlement baseline.
 - scripts/personal/site_search.test.mjs: search-mode key handling and provider-label tests.
