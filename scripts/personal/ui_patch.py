@@ -1,16 +1,12 @@
 """Shared, anchor-checked changes for released artifacts and full source builds."""
-IMPORT='import { getKeywordTabEngine, shouldHandleSearchTab } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'
+IMPORT='import { enterKeywordTabSearch, shouldHandleSearchTab } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'
 BRANCH='''        if (shouldHandleSearchTab(this.input, event)) {
           event.preventDefault();
           if (executeAction) {
-            const keywordEngine = getKeywordTabEngine(this.input, event);
-            if (keywordEngine) {
-              this.input.search("", {
-                searchEngine: keywordEngine,
-                searchModeEntry: "typed",
-              });
-            } else if (!this.input.value && !this.input.searchMode) {
+            if (!this.input.value && !this.input.searchMode) {
               this.window.gZenUIManager.enableCommandsMode(event);
+            } else {
+              enterKeywordTabSearch(this.input, event).catch(console.error);
             }
           }
           break;
@@ -19,7 +15,7 @@ BRANCH='''        if (shouldHandleSearchTab(this.input, event)) {
 '''
 
 def patch_controller(source):
-    if 'getKeywordTabEngine' in source:
+    if 'enterKeywordTabSearch' in source or 'getKeywordTabEngine' in source:
         raise RuntimeError('Controller already contains the personal patch; use a clean base')
     anchor='export class UrlbarChildController {'
     if source.count(anchor)!=1:
@@ -41,7 +37,18 @@ def patch_input(source):
     anchor='this._searchModeIndicatorTitle.textContent = engineName;'
     if source.count(anchor)!=1:
         raise RuntimeError('Upstream search badge changed; review the patch')
-    return source.replace(anchor, '''this._searchModeIndicatorTitle.textContent = getProviderLabel(
+    source=source.replace(anchor, '''this._searchModeIndicatorTitle.textContent = getProviderLabel(
           engineName,
           this.controller.engineStore.getEngineByName(engineName)?.aliases
         );''')
+    anchor='''          { name: engineName }
+        );
+      } else if (source) {'''
+    if source.count(anchor)!=1:
+        raise RuntimeError('Upstream search accessibility label changed; review the patch')
+    return source.replace(anchor, '''          { name: getProviderLabel(
+              engineName,
+              this.controller.engineStore.getEngineByName(engineName)?.aliases
+            ) }
+        );
+      } else if (source) {''')

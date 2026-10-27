@@ -41,7 +41,7 @@ jobs:
           from ui_patch import patch_controller
           sample='export class UrlbarChildController {\n      case KeyEvent.DOM_VK_TAB: {\n'
           changed=patch_controller(sample)
-          assert 'getKeywordTabEngine(this.input, event)' in changed
+          assert 'enterKeywordTabSearch(this.input, event)' in changed
           try:
               patch_controller(changed)
           except RuntimeError:

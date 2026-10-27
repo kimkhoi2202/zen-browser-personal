@@ -24,6 +24,29 @@ export function getKeywordTabEngine(input, event) {
   return matches.length == 1 ? matches[0] : null;
 }
 
+export async function enterKeywordTabSearch(input, event) {
+  const keyword = input.userTypedValue ?? input.value ?? "";
+  if (!shouldHandleSearchTab(input, event) || input.searchMode || !/^\S+$/u.test(keyword)) {
+    return false;
+  }
+  if (!input.controller.engineStore.initialized) {
+    try {
+      await input.controller.engineStore.init();
+    } catch {
+      return false;
+    }
+    if (!input.focused || (input.userTypedValue ?? input.value ?? "") != keyword) {
+      return false;
+    }
+  }
+  const engine = getKeywordTabEngine(input, event);
+  if (!engine) {
+    return false;
+  }
+  input.search("", { searchEngine: engine, searchModeEntry: "typed" });
+  return true;
+}
+
 export function getProviderLabel(engineName, aliases = []) {
   const suffix = engineName?.match(/^(.*?)\s+\(([^()]+)\)$/u);
   return suffix && aliases.some(alias => alias.toLowerCase() == suffix[2].toLowerCase())

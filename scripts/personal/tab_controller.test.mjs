@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {getKeywordTabEngine,shouldHandleSearchTab} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
+import {enterKeywordTabSearch,shouldHandleSearchTab} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
 
 const scripts=fileURLToPath(new URL('.',import.meta.url));
 const nativeFixture=`export class UrlbarChildController {
@@ -24,9 +24,9 @@ const nativeFixture=`export class UrlbarChildController {
 const patched=execFileSync('python3',['-c',
   'import sys; from ui_patch import patch_controller; print(patch_controller(sys.stdin.read()))'],
   {cwd:scripts,input:nativeFixture,encoding:'utf8'});
-const Controller=new Function('getKeywordTabEngine','shouldHandleSearchTab','KeyEvent',
+const Controller=new Function('enterKeywordTabSearch','shouldHandleSearchTab','KeyEvent',
   patched.replace(/^import .*;\n/m,'').replace('export class','class')+'\nreturn UrlbarChildController;')(
-    getKeywordTabEngine,shouldHandleSearchTab,{DOM_VK_TAB:9,DOM_VK_UP:38,DOM_VK_DOWN:40});
+    enterKeywordTabSearch,shouldHandleSearchTab,{DOM_VK_TAB:9,DOM_VK_UP:38,DOM_VK_DOWN:40});
 
 function fixture(text='guitar') {
   const c=new Controller(), searches=[];

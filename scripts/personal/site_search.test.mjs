@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {getKeywordTabEngine,shouldHandleSearchTab,getProviderLabel,getProviderTheme,applyProviderBadge,PROVIDER_THEMES} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
+import {getKeywordTabEngine,enterKeywordTabSearch,shouldHandleSearchTab,getProviderLabel,getProviderTheme,applyProviderBadge,PROVIDER_THEMES} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
 
 const yt={name:'YouTube',aliases:['y','youtube.com']};
 const maps={name:'Google Maps',aliases:['maps']};
@@ -76,3 +76,33 @@ for (const [name,aliases,label] of [
 ]) {
   test('provider label '+name,()=>assert.equal(getProviderLabel(name,aliases),label));
 }
+
+test('first Tab waits for engine startup and activates once ready',async()=>{
+  const t=fixture({focused:true});let complete;let calls=0;
+  t.input.controller.engineStore.initialized=false;
+  t.input.controller.engineStore.init=()=>new Promise(resolve=>{complete=resolve;});
+  t.input.search=()=>{calls++;};
+  const activation=enterKeywordTabSearch(t.input,t.event);
+  assert.equal(calls,0);t.input.controller.engineStore.initialized=true;complete();
+  assert.equal(await activation,true);assert.equal(calls,1);
+});
+for (const change of ['typing','blur','mode']) {
+  test('deferred Tab never overwrites '+change,async()=>{
+    const t=fixture({focused:true});let complete;let calls=0;
+    t.input.controller.engineStore.initialized=false;
+    t.input.controller.engineStore.init=()=>new Promise(resolve=>{complete=resolve;});
+    t.input.search=()=>{calls++;};
+    const activation=enterKeywordTabSearch(t.input,t.event);
+    if(change=='typing')t.input.userTypedValue='new query';
+    if(change=='blur')t.input.focused=false;
+    if(change=='mode')t.input.searchMode={engineName:'Google Maps'};
+    t.input.controller.engineStore.initialized=true;complete();
+    assert.equal(await activation,false);assert.equal(calls,0);
+  });
+}
+test('failed engine startup leaves typed text intact',async()=>{
+  const t=fixture({focused:true});t.input.controller.engineStore.initialized=false;
+  t.input.controller.engineStore.init=()=>Promise.reject(new Error('synthetic startup failure'));
+  assert.equal(await enterKeywordTabSearch(t.input,t.event),false);
+  assert.equal(t.input.userTypedValue,'y');
+});
