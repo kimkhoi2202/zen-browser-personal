@@ -1,4 +1,52 @@
-# Production promotion — 2026-10-26
+# Named apps: personal.4 — 2026-10-26
+
+The user requested three distinct applications. They are now installed:
+
+| App | Installed path | Identity / data |
+|---|---|---|
+| Official Zen | /Applications/Zen.app | app.zen-browser.zen; original vendor profile |
+| Zen (Prod) | /Applications/Zen (Prod).app | com.kimkhoi.zen; existing isolated Production profile |
+| Zen (Dev) | /Applications/Zen (Dev).app | com.kimkhoi.zen.dev; existing isolated Dev profile |
+
+Official Zen was restored from the preserved vendor app. Its strict/deep vendor
+signature and native executable/resource-archive hashes verify against that
+backup. The custom apps are separately Developer-ID signed. Their profile paths
+and bundle/remoting IDs did not change during the rename; no profile import,
+credential export or data merging was performed.
+
+Current packaged runtime source: `29706e913739653b36facb03c67a62c8b531216e`,
+tag `personal-1.23.4b.4`. Candidate directories are
+Development/dist/releases/personal.4-named and
+Production/dist/releases/personal.4-named. Each has its own Build Manifest.json.
+The previous custom apps and a verified closed Production profile snapshot are
+retained privately outside Git under the App Names 2026-10-26 backup.
+
+## Verified changes
+
+- Badge text and accessibility name display Chordify rather than Chordify (chordify).
+  Canonical engine identities/aliases and search URLs remain unchanged.
+- Bare Tab enters a typed site-search alias, even after arrow navigation. It
+  leaves an existing highlighted suggestion unchanged instead of cycling rows.
+- Native Down advances and Up returns through new-tab suggestions. These were
+  verified in the installed Zen (Prod), including selection unchanged after Tab.
+- The first Tab waits for engine initialization. A later edit, blur or mode switch
+  cancels deferred activation instead of replacing newer input.
+- No explanatory text, instructional labels or helper UI was added.
+- All 77 JavaScript tests and 5 Python tests pass locally. Tests execute the actual
+  injected Tab branch; macOS launcher compilation is skipped on Linux CI.
+- Both named custom apps launched with canonical ini paths and their existing
+  isolated profiles. Six builtin components are present in each; Prod retains
+  its 13 installed extensions.
+
+Unique app paths now work with the UI control tool. The previous catalogue issue
+below is historical. The prior 1Password trusted-browser and default-browser
+checks were not part of this naming/search update and remain separate; the OS
+can retain its official-Zen default. No automatic updater or Apple notarization
+was added to the custom channels.
+
+---
+
+# Previous promotion: personal.3 — 2026-10-26
 
 The user accepted the personal browser features for daily use. These packages
 are our custom production channel, not an official Zen-team release.

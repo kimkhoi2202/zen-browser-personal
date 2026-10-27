@@ -116,6 +116,16 @@ an unrelated branch's work or force-push shared release history.
 
 ## Accepted production source and updates
 
+Current release is **personal.4**, packaged from
+`29706e913739653b36facb03c67a62c8b531216e` and tagged `personal-1.23.4b.4`.
+The installed apps are official Zen, Zen (Prod) and Zen (Dev). The two custom
+apps retain their existing separate profiles. Bare Tab is for site search;
+Up/Down navigate suggestions. Redundant alias suffixes are hidden in the badge
+and accessibility label. All 77 JS tests and 5 Python safety/launcher tests pass.
+Native production testing confirms the behavior. See Production.md for current
+package paths and verified evidence. The personal.3 startup-fix history follows.
+
+
 The user accepted personal.2 on 2026-10-26. Production now contains the accepted
 commands/search/layout code. A startup check found that the launcher must resolve
 its application.ini path before passing it to Gecko: parent segments caused
