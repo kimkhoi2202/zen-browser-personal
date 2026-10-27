@@ -1,3 +1,29 @@
+# Toolbar update personal.6 — pending production verification
+
+Runtime source is 5514649e4ff9a73945baf4469a1ab156d1ea9404, tagged
+personal-1.23.4b.6. The only browser-resource difference from personal.5 is
+zen-omnibox.css: Copy URL moves from order -1 to 998, before identity-box at 999.
+Padding/gap remain unchanged. The packager now includes that tracked stylesheet.
+
+Zen (Dev) personal.6 is installed and its toolbar was visually checked on a real
+page. Previous Dev app/profile are preserved under the private backup
+Toolbar 2026-10-27 personal.6. Existing 77 JS and 8 Python checks pass.
+
+Production candidate and DMG in Development/dist/public-personal.6 are signed,
+Apple-notarized, stapled and Gatekeeper accepted. SHA256:
+64c262f46ac1f524dda469bce47a62cbc585f2f0669b582fe1aa6363a22452a3.
+Production is still personal.5; personal.6 is not publicly released yet. The user
+authorized publication but Prod kept changing pages despite an idle confirmation;
+await the user's reply that Prod is fully closed before installation/profile tests.
+Do not publish with --native-tested until the exact production candidate is tested.
+
+1Password Settings > Browser now lists official Zen and Zen (Prod), following
+explicit user authorization and their Touch ID approval. Desktop integration and
+Unlock using Touch ID are enabled. The Prod extension opened unlocked with the
+repeated-password warning absent before the update. Verify again after install.
+The intermittent cursor issue recovered without a cursor code/settings change;
+closing DevTools as the trigger was not established.
+
 # Public release personal.5 — 2026-10-27
 
 Zen (Prod) personal.5 is published at:

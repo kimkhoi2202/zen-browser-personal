@@ -5,6 +5,7 @@ personal/channels.json. The user authorized Zen (Dev) for testing and Zen (Prod)
 daily use, alongside the untouched official Zen app, keyword-plus-Tab search and provider-colored badges.
 
 Source mapping:
+- src/zen/common/styles/zen-omnibox.css: native URL-bar control order; packaged by build_macos.py.
 - src/zen/urlbar/PersonalSiteSearch.mjs: exact alias activation and badge colors.
 - src/zen/urlbar/PersonalCommandActions.mjs: native command descriptors and matching.
 - scripts/personal/commands.test.mjs: native action, visibility and matching checks.
