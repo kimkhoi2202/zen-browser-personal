@@ -1,0 +1,48 @@
+/* Keep Mozilla's cards and detail views; use the available width for extensions. */
+#content:has(> #main > addon-list[type="extension"]) {
+  --page-main-content-width: none;
+  min-inline-size: 0;
+}
+
+#main > addon-list[type="extension"] {
+  container: zen-addons / inline-size;
+}
+
+#main > addon-list[type="extension"] > section {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-large);
+  align-items: start;
+
+  > :not(addon-card) {
+    grid-column: 1 / -1;
+  }
+
+  > .list-section-heading {
+    margin-block-end: 0;
+  }
+
+  > addon-card {
+    min-inline-size: 0;
+  }
+
+  > addon-card[panelopen] {
+    z-index: var(--z-index-popup);
+  }
+
+  > addon-card > .addon.card {
+    margin-block-end: 0;
+  }
+}
+
+@container zen-addons (min-width: 49rem) {
+  #main > addon-list[type="extension"] > section {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container zen-addons (min-width: 74rem) {
+  #main > addon-list[type="extension"] > section {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

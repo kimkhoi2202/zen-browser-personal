@@ -1,4 +1,18 @@
 """Shared, anchor-checked changes for released artifacts and full source builds."""
+ADDONS_CSS_ARCHIVE='chrome/toolkit/content/mozapps/extensions/aboutaddons.css'
+ADDONS_CSS_SOURCE='src/zen/common/styles/zen-addons-grid.css'
+ADDONS_CSS_MARKER='/* Personal Zen: responsive extension list. */'
+
+
+def patch_addons_styles(source, styles):
+    if ADDONS_CSS_MARKER in source:
+        raise RuntimeError('Add-ons stylesheet already patched; use a clean base')
+    for anchor in ('#main > addon-list > section,', 'max-width: var(--page-main-content-width);'):
+        if anchor not in source:
+            raise RuntimeError('Upstream add-ons layout changed; review the patch')
+    return source.rstrip()+'\n\n'+ADDONS_CSS_MARKER+'\n'+styles.rstrip()+'\n'
+
+
 IMPORT='import { enterKeywordTabSearch, shouldHandleSearchTab } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'
 BRANCH='''        if (shouldHandleSearchTab(this.input, event)) {
           event.preventDefault();

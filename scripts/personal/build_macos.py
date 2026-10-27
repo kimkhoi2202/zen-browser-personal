@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from ui_patch import patch_controller, patch_input
+from ui_patch import patch_controller, patch_input, patch_addons_styles, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE
 
 ROOT=Path(__file__).resolve().parents[2]
 CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
@@ -41,10 +41,10 @@ def source_metadata():
     paths=['src/zen/urlbar/PersonalSiteSearch.mjs','src/zen/urlbar/ZenUrlbarController.mjs',
            'scripts/personal/ui_patch.py','personal/launcher.c','personal/channels.json',
            'personal/entitlements.plist','scripts/personal/build_macos.py','prefs/zen/view.yaml',
-           *ADDITIONAL_UI.values()]
+           ADDONS_CSS_SOURCE,*ADDITIONAL_UI.values()]
     return {'commit':revision,'dirty':dirty,'file_sha256':{p:sha(ROOT/p) for p in paths}}
 
-def extract_archive(archive,directory):
+def extract_archive(archive,directory,required_entry=CONTROLLER):
     # Mozilla's optimized ZIP is understood by unzip, whose warning exit status
     # is not a failed extraction. Confirm every entry by CRC after normalization.
     result=subprocess.run(['unzip','-q',str(archive),'-d',str(directory)],capture_output=True)
@@ -60,7 +60,7 @@ def extract_archive(archive,directory):
     expected={n for n in listing.stdout.decode().splitlines() if n and not n.endswith('/')}
     actual={p.relative_to(directory).as_posix() for p in directory.rglob('*') if p.is_file()}
     if not expected or expected!=actual:raise RuntimeError('Incomplete resource archive extraction')
-    if not (directory/CONTROLLER).is_file():raise RuntimeError('Missing native controller after extraction')
+    if not (directory/required_entry).is_file():raise RuntimeError('Missing required resource after extraction')
 
 def package_archive(directory,path):
     with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as z:
@@ -106,6 +106,14 @@ def build(base,channel,identity,output):
         if prefs.count(anchor)!=1:raise RuntimeError('Review upstream toolbar default before packaging')
         defaults.write_text(prefs.replace(anchor,'pref("zen.view.use-single-toolbar", false);'))
         package_archive(extracted,archive)
+    platform_archive=app/'Contents/Resources/omni.ja'
+    original_platform_archive_sha=sha(platform_archive)
+    with tempfile.TemporaryDirectory(prefix='zen-personal-addons-') as temp:
+        extracted=Path(temp)
+        extract_archive(platform_archive,extracted,ADDONS_CSS_ARCHIVE)
+        stylesheet=extracted/ADDONS_CSS_ARCHIVE
+        stylesheet.write_text(patch_addons_styles(stylesheet.read_text(),(ROOT/ADDONS_CSS_SOURCE).read_text()))
+        package_archive(extracted,platform_archive)
     plist_path=app/'Contents/Info.plist'
     plist=plistlib.loads(plist_path.read_bytes())
     plist.update(CFBundleIdentifier=settings['bundleId'],CFBundleName=settings['appName'],
@@ -150,6 +158,7 @@ def build(base,channel,identity,output):
             'engine':'official released engine; frontend modules customized',
             'architectures':architectures,'minimum_macos':base_info.get('LSMinimumSystemVersion','11.0'),
             'base_archive_sha256':original_archive_sha,'modified_archive_sha256':sha(archive),
+            'base_platform_archive_sha256':original_platform_archive_sha,'modified_platform_archive_sha256':sha(platform_archive),
             'native_tested':False,'promoted':False,'auto_updates':'disabled for custom channel; rebuild from new upstream release',
             'signing':'local keychain identity; no private key exported','identity_fingerprint':identity}
     (output/'Build Manifest.json').write_text(json.dumps(report,indent=2)+'\n')
