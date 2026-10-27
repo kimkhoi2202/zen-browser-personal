@@ -3,7 +3,7 @@
   "fork": "kimkhoi2202/zen-browser-personal",
   "revision": "personal.4",
   "channels": {
-    "dev": {"appName":"Zen Dev","bundleId":"com.kimkhoi.zen.dev","profileDirectory":"Dev","remotingName":"zen-personal-dev"},
-    "production": {"appName":"Zen","bundleId":"com.kimkhoi.zen","profileDirectory":"Production","remotingName":"zen-personal"}
+    "dev": {"appName":"Zen (Dev)","bundleId":"com.kimkhoi.zen.dev","profileDirectory":"Dev","remotingName":"zen-personal-dev"},
+    "production": {"appName":"Zen (Prod)","bundleId":"com.kimkhoi.zen","profileDirectory":"Production","remotingName":"zen-personal"}
   }
 }

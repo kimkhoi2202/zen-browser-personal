@@ -8,8 +8,8 @@ Two channels from the same reviewed source:
 
 | Channel | App | Bundle ID | Profile |
 |---|---|---|---|
-| Dev | Zen Dev | com.kimkhoi.zen.dev | ~/Library/Application Support/Zen Personal/Dev |
-| Production | Zen | com.kimkhoi.zen | ~/Library/Application Support/Zen Personal/Production |
+| Dev | Zen (Dev) | com.kimkhoi.zen.dev | ~/Library/Application Support/Zen Personal/Dev |
+| Production | Zen (Prod) | com.kimkhoi.zen | ~/Library/Application Support/Zen Personal/Production |
 
 The vendor app and original profile are preserved outside Git for rollback.
 The user accepted the personal changes for production on 2026-10-26. See
@@ -57,8 +57,8 @@ hashes, and the modified resource archive hash. Keep it with the candidate.
 See [the initial native verification record](Verification.md) for completed
 checks and the integration work still needed before daily use.
 
-Zen Dev is installed at `/Applications/Zen Dev.app`; the main custom channel
-uses `/Applications/Zen.app`. Each has its own forced profile. Dev is signed out
+Zen (Dev) is installed at `/Applications/Zen (Dev).app`; the custom daily channel
+uses `/Applications/Zen (Prod).app`. Official Zen stays at `/Applications/Zen.app`. Each has its own forced profile. Dev is signed out
 and has no copied extensions. The production profile is a verified copy of the
 closed original daily profile, with app/profile path metadata rebased. The source
 profile is retained unchanged; this is a copy, not a move.

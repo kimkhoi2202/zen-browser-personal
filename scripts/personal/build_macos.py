@@ -70,6 +70,9 @@ def package_archive(directory,path):
 
 def build(base,channel,identity,output):
     settings=CONFIG['channels'][channel]
+    base_info=plistlib.loads((base/'Contents/Info.plist').read_bytes())
+    if base_info.get('CFBundleIdentifier')!='app.zen-browser.zen' or not (base/'Contents/MacOS/zen').is_file():
+        raise RuntimeError('Use an unmodified official Zen app as the build base')
     metadata=configparser.ConfigParser(interpolation=None)
     metadata.optionxform=str
     metadata.read(base/'Contents/Resources/application.ini')

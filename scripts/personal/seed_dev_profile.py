@@ -11,8 +11,10 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--source',type=Path,required=True)
 args=parser.parse_args()
 target=Path.home()/'Library/Application Support/Zen Personal/Dev'
-if subprocess.run(['pgrep','-f',r'^.*/Zen Dev\.app/Contents/MacOS/zen-engine'],capture_output=True).returncode==0:
-    raise SystemExit('Quit Zen Dev normally before seeding its profile')
+if subprocess.run(['pgrep','-f',r'^.*/Zen(?: Dev| \(Dev\))\.app/Contents/MacOS/zen-engine'],capture_output=True).returncode==0:
+    raise SystemExit('Quit Zen (Dev) normally before seeding its profile')
+if (target/'.parentlock').exists() and subprocess.run(['lsof','-t',str(target/'.parentlock')],capture_output=True).stdout.strip():
+    raise SystemExit('Dev profile is still open; quit its browser normally first')
 source=args.source.expanduser().resolve()
 if source==target.resolve():raise SystemExit('Source must differ from Dev')
 source_prefs=(source/'prefs.js').read_text()

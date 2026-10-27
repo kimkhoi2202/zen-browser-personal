@@ -7,8 +7,9 @@ machine-specific paths and the verified state after relocation.
 
 ## Goal and implementation
 
-Maintain two app identities: **Zen Dev** for testing and **Zen** for accepted
-daily releases. Each forces a different browser profile. The first personal
+Maintain two app identities: **Zen (Dev)** for testing and **Zen (Prod)** for accepted
+daily releases. Official **Zen** remains a third app at /Applications/Zen.app.
+Each custom app forces its existing separate browser profile. The first personal
 feature makes an exact search alias followed by bare Tab enter native site
 search, with provider-colored badges resembling Arc. Bare Tab never cycles
 URL-bar suggestions; native Up/Down do. Typed aliases win even after arrow
@@ -77,10 +78,10 @@ python3 scripts/personal/build_macos.py \
   --channel dev \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
   --output dist/dev-next
-codesign --verify --deep --strict 'dist/dev-next/Zen Dev.app'
+codesign --verify --deep --strict 'dist/dev-next/Zen (Dev).app'
 ```
 
-Do not build from the custom app as the base. Its modified native entry point
+Do not build from either custom app as the base. Its modified native entry point
 and resource archive are already patched. Do not overwrite an existing candidate
 or replace an installed app while it is running. Test the newly built signed app
 with app-scoped controls before installing it, preserving the previous build.
@@ -131,10 +132,10 @@ and [Arc Commands.md](Arc%20Commands.md) for the 50-test command implementation
 and previous Dev smoke tests. Later tooling/documentation commits do not imply
 that installed apps have been rebuilt.
 
-The installed main app is our custom production identity, not a release signed
-or published by the Zen team. The vendor app and original profile are preserved
-outside Git. Dev remains isolated and signed out. Build future candidates from
-a verified official base app, never from the customized `/Applications/Zen.app`.
+The installed custom production app is distinct from the official vendor app.
+The official app and original profile stay separate from both custom profiles;
+full rollback copies remain outside Git. Dev remains isolated and signed out. Build future candidates from
+a verified official base app, never from the customized `/Applications/Zen (Prod).app`.
 The parent workspace handoff contains the local official-base/backup paths.
 
 For upstream updates, fetch tags, merge the selected release into an update

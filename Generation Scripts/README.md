@@ -1,8 +1,8 @@
 # Personal browser build scripts
 
 The project is a personal fork of zen-browser/desktop pinned in
-personal/channels.json. The user authorized Zen Dev for testing and Zen for
-eventual daily use, keyword-plus-Tab search and provider-colored badges.
+personal/channels.json. The user authorized Zen (Dev) for testing and Zen (Prod) for
+daily use, alongside the untouched official Zen app, keyword-plus-Tab search and provider-colored badges.
 
 Source mapping:
 - src/zen/urlbar/PersonalSiteSearch.mjs: exact alias activation and badge colors.
@@ -29,7 +29,7 @@ Source mapping:
 Build output apps/manifests stay in ignored dist/. Code signing uses an existing
 local keychain identity passed at invocation; no keys/passwords are saved here.
 The original vendor app and source profile must remain intact in their private
-backup/source locations. Do not use the customized /Applications/Zen.app as the
+backup/source locations. Do not use the customized /Applications/Zen (Prod).app as the
 base for a later artifact build. The parent workspace handoff records paths.
 
 Only use app-scoped CUA for native testing. No global Computer/AppleScript or
