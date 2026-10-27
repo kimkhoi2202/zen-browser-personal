@@ -1,28 +1,48 @@
-# Toolbar update personal.6 — pending production verification
+# Current release personal.6 — 2026-10-27
 
-Runtime source is 5514649e4ff9a73945baf4469a1ab156d1ea9404, tagged
-personal-1.23.4b.6. The only browser-resource difference from personal.5 is
-zen-omnibox.css: Copy URL moves from order -1 to 998, before identity-box at 999.
-Padding/gap remain unchanged. The packager now includes that tracked stylesheet.
+Zen (Prod) and Zen (Dev) personal.6 are installed at their separate Applications
+paths. Official Zen is unchanged. Public production release:
+https://github.com/kimkhoi2202/zen-browser-personal/releases/tag/personal-1.23.4b.6
+Runtime source: 5514649e4ff9a73945baf4469a1ab156d1ea9404, tag personal-1.23.4b.6.
+Later documentation commits do not change the packaged runtime.
 
-Zen (Dev) personal.6 is installed and its toolbar was visually checked on a real
-page. Previous Dev app/profile are preserved under the private backup
-Toolbar 2026-10-27 personal.6. Existing 77 JS and 8 Python checks pass.
+Copy URL now follows the URL text and precedes the square site-controls button.
+The only browser-resource change from personal.5 is zen-omnibox.css: copy order
+moves from -1 to 998, before identity-box at 999. Existing padding and gap are
+unchanged. build_macos.py now packages that tracked stylesheet.
 
-Production candidate and DMG in Development/dist/public-personal.6 are signed,
-Apple-notarized, stapled and Gatekeeper accepted. SHA256:
+The stable base is still Zen 1.23.4b, verified current on 2026-10-27. All 77 JS
+and 8 Python checks pass. Native checks on Apple Silicon verified Dev layout,
+clean production startup/onboarding, and the restored daily profile's toolbar.
+The installed production executable/archive match the notarized candidate.
+The universal app and DMG are signed, Apple-notarized, stapled and Gatekeeper
+accepted. Intel hardware testing remains pending. GitHub Actions is disabled.
+
+Candidates and native screenshots: Development/dist/public-personal.6 and
+Development/dist/toolbar-personal.6-dev. The published DMG was downloaded back
+and its hash verified; anonymous ranged download returned HTTP 206. SHA256:
 64c262f46ac1f524dda469bce47a62cbc585f2f0669b582fe1aa6363a22452a3.
-Production is still personal.5; personal.6 is not publicly released yet. The user
-authorized publication but Prod kept changing pages despite an idle confirmation;
-await the user's reply that Prod is fully closed before installation/profile tests.
-Do not publish with --native-tested until the exact production candidate is tested.
 
-1Password Settings > Browser now lists official Zen and Zen (Prod), following
-explicit user authorization and their Touch ID approval. Desktop integration and
-Unlock using Touch ID are enabled. The Prod extension opened unlocked with the
-repeated-password warning absent before the update. Verify again after install.
-The intermittent cursor issue recovered without a cursor code/settings change;
-closing DevTools as the trigger was not established.
+The daily Production profile is restored, with all 4307 original file hashes
+matching before launch. All 13 user extensions remain active. Private rollback:
+~/Library/Application Support/Zen Personal/Backups/Toolbar 2026-10-27 personal.6.
+It preserves previous Prod/Dev apps, verified profile copies, the clean smoke-test
+profile, and private fingerprints/installation evidence. Do not restore the
+smoke-test profile over the daily profile. No profile remains temporarily moved.
+
+1Password: desktop browser integration and Unlock using Touch ID are enabled.
+Official Zen and Zen (Prod) are separately trusted after explicit user approval.
+Replacing Prod caused the misleading Firefox-update password warning to return;
+removing/re-adding the updated Prod trust entry and Touch ID authorization restored
+an unlocked extension popup, confirmed by the user's screenshot. Actual Touch ID
+unlock after a future lock is still untested; do not describe it as device-verified.
+Future custom-app replacements may need that same trust refresh. No vault data
+or authentication files were exported. Cursor behavior recovered without a cursor
+code/settings change; closing DevTools as the specific trigger was not established.
+
+Custom browser updates remain manual. Use personal/Releasing.md and the local
+release scripts; never use GitHub runners or install vendor binary updates over
+this custom identity. Preserve all three apps and their separate profiles.
 
 # Public release personal.5 — 2026-10-27
 

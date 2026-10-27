@@ -7,14 +7,15 @@ machine-specific paths and the verified state after relocation.
 
 ## Current public release
 
-Public release personal.5 is published and installed in Zen (Prod). See
+Public release personal.6 is published and installed in Zen (Prod). See
 [Production.md](Production.md) for source, notarization, native verification and
 rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
 The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
 dev changes were deliberately excluded. Both architectures are packaged; only
 Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
-Installed Zen (Dev) is still personal.4; its source checkout includes the new
-release tools but it has not been rebuilt as part of this production release.
+Installed Zen (Dev) is personal.6 as well. Copy URL is now on the right, before
+site controls, with the existing spacing unchanged. See Production.md for the
+1Password trust refresh and the remaining next-lock Touch ID check.
 
 ## Goal and implementation
 
