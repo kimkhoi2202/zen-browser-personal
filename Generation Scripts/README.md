@@ -15,6 +15,7 @@ Source mapping:
 - src/zen/urlbar/ZenUrlbarController.mjs: native search-mode/theme integration.
 - scripts/personal/ui_patch.py: shared native controller injection.
 - scripts/personal/build_macos.py: reproducible signed macOS artifact creation.
+- scripts/personal/build_macos.py verify_engine_identity: rejects a running engine that does not satisfy the outer app's Developer ID designated requirement; see personal/1Password Integration.md for the personal.8 investigation and remaining native verification.
 - scripts/personal/release_macos.py: local preparation, notarization, DMG generation, checksum verification and GitHub release upload; see personal/Releasing.md.
 - scripts/personal/release_test.py: rejects accidental profile/key payloads and escaping bundle links.
 - personal/Public Release.md: Read Me bundled in the public disk image.

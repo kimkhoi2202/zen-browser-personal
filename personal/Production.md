@@ -1,4 +1,30 @@
-# Current release personal.6 — 2026-10-27
+# Local production personal.8 — 2026-10-27
+
+Installed Zen (Prod) personal.8 is a local-only update from runtime source
+bcc8499739687dcc15c6f83b2607edbddbab0854. It includes the responsive extension grid
+and a packaging correction that signs the running engine with the app's identity.
+Both satisfy the complete Developer ID designated requirement; future builds
+enforce that check. See 1Password Integration.md and Add-ons Layout.md.
+
+All 77 JavaScript and 11 Python checks passed. The installed universal app is
+Developer-ID signed, Apple-notarized, stapled and Gatekeeper accepted. Native
+testing on Apple Silicon verified the real three-column manager, extension
+menu/details/toggle behavior, the desktop 1Password connection and connection
+again after a Prod restart. The user confirmed Touch ID unlock after a manual
+lock and that the misleading Firefox update warning was gone. Intel hardware
+testing remains pending. Installed Dev stays personal.7; official Zen is unchanged.
+
+The existing daily Production profile stayed in place, with all 9,965 file
+fingerprints matching before launch and all 13 extensions preserved. Private
+rollback: ~/Library/Application Support/Zen Personal/Backups/1Password Integration
+2026-10-27 personal.8. It includes the previous app and both profile snapshots;
+Production Profile Before Install is the final verified pre-install snapshot.
+
+Candidate and evidence: Development/dist/integration-personal.8-prod. This update
+has no public tag or download; no source push or release publication was performed.
+The public download remains personal.6, and GitHub Actions remains disabled.
+
+# Public release personal.6 — 2026-10-27
 
 Zen (Prod) and Zen (Dev) personal.6 are installed at their separate Applications
 paths. Official Zen is unchanged. Public production release:

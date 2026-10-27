@@ -7,7 +7,14 @@ machine-specific paths and the verified state after relocation.
 
 ## Current public release
 
-Public release personal.6 is published and installed in Zen (Prod). See
+Local-only personal.8 is installed and corrects the running engine's signing
+identity for 1Password; see [1Password Integration.md](1Password%20Integration.md).
+The native desktop connection passes, including after a Prod restart. The user
+confirmed actual Touch ID unlock after a manual lock and that the warning is gone.
+The responsive extension grid and real menu/details/toggle checks also pass.
+Do not publish this update.
+
+Public release personal.6 remains published; local Prod is newer personal.8. See
 [Production.md](Production.md) for source, notarization, native verification and
 rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
 The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
@@ -15,9 +22,9 @@ dev changes were deliberately excluded. Both architectures are packaged; only
 Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
 Installed Zen (Dev) is now a signed personal.7 responsive extension-list preview;
 see [Add-ons Layout.md](Add-ons%20Layout.md) for source and exact verification limits.
-Prod/public stay personal.6. Copy URL is on the right, before site controls, with
+Prod includes that layout; public stays personal.6. Copy URL is on the right, before site controls, with
 spacing unchanged. See Production.md for the 1Password trust refresh and the
-remaining next-lock Touch ID check.
+personal.8 follow-up in 1Password Integration.md.
 
 ## Goal and implementation
 
