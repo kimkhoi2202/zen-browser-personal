@@ -10,9 +10,10 @@ machine-specific paths and the verified state after relocation.
 Maintain two app identities: **Zen Dev** for testing and **Zen** for accepted
 daily releases. Each forces a different browser profile. The first personal
 feature makes an exact search alias followed by bare Tab enter native site
-search, with provider-colored badges resembling Arc. Up/Down, native Space,
-unknown aliases, modifiers, IME, and lower selected suggestions retain native
-handling. Search aliases are profile data, not hard-coded into the module.
+search, with provider-colored badges resembling Arc. Bare Tab never cycles
+URL-bar suggestions; native Up/Down do. Typed aliases win even after arrow
+navigation. Modifiers, IME, native Space and webpage Tab retain native handling.
+Badge labels omit trailing configured aliases without changing engine identity. Search aliases are profile data, not hard-coded into the module.
 
 The first candidates reuse the released Zen 1.23.4b native engine; the changed
 JavaScript frontend is packaged and locally signed. A full Firefox/C++ compile
@@ -28,7 +29,7 @@ has not been performed. See [README.md](README.md) and [Verification.md](Verific
 | `src/zen/urlbar/ZenUBActionsProvider.sys.mjs` | Searches aliases and prioritizes unambiguous commands in native result rows |
 | `src/zen/urlbar/ZenUrlbarController.mjs` | Installs styles; applies them when native search mode changes |
 | `src/zen/urlbar/moz.build` | Registers the custom module for full source imports |
-| `scripts/personal/ui_patch.py` | Exact-anchor native Tab-handler overlay shared by both build paths |
+| `scripts/personal/ui_patch.py` | Exact-anchor native Tab and badge-label overlays shared by both build paths |
 | `scripts/personal/build_macos.py` | Checks the official base, repackages UI, creates identities/launcher, signs, records manifest |
 | `scripts/personal/apply_to_engine.py` | Applies the native Tab overlay after full engine import |
 | `scripts/personal/clone_profile.py` | Back up and copy a closed daily profile into a new isolated production profile |
@@ -38,7 +39,7 @@ has not been performed. See [README.md](README.md) and [Verification.md](Verific
 | `personal/launcher.c` | Forces per-channel app ini and isolated profile; runs the native engine |
 | `personal/channels.json` | Upstream pin, personal revision, app names, bundle/remoting IDs and profiles |
 | `personal/entitlements.plist` | Local signing entitlement baseline |
-| `scripts/personal/*.test.mjs` | 50 focused command/module/channel tests |
+| `scripts/personal/*.test.mjs` | Focused command/module/channel and injected-controller tests |
 | `.github/workflows/personal-checks.yml` | Lightweight tests/syntax/patch-anchor CI |
 | `Generation Scripts/README.md` | Generation-script mapping and continuation context |
 

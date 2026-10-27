@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {getKeywordTabEngine,getProviderTheme,applyProviderBadge,PROVIDER_THEMES} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
+import {getKeywordTabEngine,shouldHandleSearchTab,getProviderLabel,getProviderTheme,applyProviderBadge,PROVIDER_THEMES} from '../../src/zen/urlbar/PersonalSiteSearch.mjs';
 
 const yt={name:'YouTube',aliases:['y','youtube.com']};
 const maps={name:'Google Maps',aliases:['maps']};
@@ -9,24 +9,24 @@ function fixture(patch={}) {
     controller:{engineStore:{initialized:true,getEngines:()=>[yt,maps]}},...patch};
   return {input,view:{selectedRowIndex:0},event:{key:'Tab'}};
 }
-test('exact keyword wins over an autocompleted URL',()=>{const t=fixture();assert.equal(getKeywordTabEngine(t.input,t.view,t.event),yt);});
+test('exact keyword wins over an autocompleted URL',()=>{const t=fixture();assert.equal(getKeywordTabEngine(t.input,t.event),yt);});
 for(const value of ['Y','youtube.com','maps']) {
-  test('configured alias '+value,()=>{const t=fixture({userTypedValue:value});assert.equal(getKeywordTabEngine(t.input,t.view,t.event),value=='maps'?maps:yt);});
+  test('configured alias '+value,()=>{const t=fixture({userTypedValue:value});assert.equal(getKeywordTabEngine(t.input,t.event),value=='maps'?maps:yt);});
 }
 for(const value of ['', ' ', ' y', 'y ', 'y guitar','unknown','https://youtube.com']) {
-  test('ordinary input '+JSON.stringify(value)+' retains native Tab',()=>{const t=fixture({userTypedValue:value});assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
+  test('ordinary input '+JSON.stringify(value)+' does not select an engine',()=>{const t=fixture({userTypedValue:value});assert.equal(getKeywordTabEngine(t.input,t.event),null);});
 }
 for(const modifier of ['shiftKey','ctrlKey','altKey','metaKey','isComposing']) {
-  test(modifier+' retains native behavior',()=>{const t=fixture();t.event[modifier]=true;assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
+  test(modifier+' retains native behavior',()=>{const t=fixture();t.event[modifier]=true;assert.equal(getKeywordTabEngine(t.input,t.event),null);});
 }
 for(const key of ['ArrowUp','ArrowDown','Enter',' ']) {
-  test(key+' is not remapped',()=>{const t=fixture();t.event.key=key;assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
+  test(key+' is not remapped',()=>{const t=fixture();t.event.key=key;assert.equal(getKeywordTabEngine(t.input,t.event),null);});
 }
-test('lower selected suggestion is honored',()=>{const t=fixture();t.view.selectedRowIndex=1;assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
-test('other inputs are untouched',()=>{const t=fixture({sapName:'smartbar'});assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
-test('existing search mode is untouched',()=>{const t=fixture({searchMode:{engineName:'Google'}});assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
-test('loading engine store falls through safely',()=>{const t=fixture();t.input.controller.engineStore.initialized=false;assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
-test('ambiguous aliases never choose an arbitrary engine',()=>{const t=fixture();t.input.controller.engineStore.getEngines=()=>[yt,{aliases:['y']}];assert.equal(getKeywordTabEngine(t.input,t.view,t.event),null);});
+test('typed alias still enters site search after arrow navigation',()=>{const t=fixture();t.view.selectedRowIndex=2;assert.equal(getKeywordTabEngine(t.input,t.event),yt);});
+test('other inputs are untouched',()=>{const t=fixture({sapName:'smartbar'});assert.equal(getKeywordTabEngine(t.input,t.event),null);});
+test('existing search mode is untouched',()=>{const t=fixture({searchMode:{engineName:'Google'}});assert.equal(getKeywordTabEngine(t.input,t.event),null);});
+test('loading engine store falls through safely',()=>{const t=fixture();t.input.controller.engineStore.initialized=false;assert.equal(getKeywordTabEngine(t.input,t.event),null);});
+test('ambiguous aliases never choose an arbitrary engine',()=>{const t=fixture();t.input.controller.engineStore.getEngines=()=>[yt,{aliases:['y']}];assert.equal(getKeywordTabEngine(t.input,t.event),null);});
 for(const [name,provider] of [['YouTube (y)','youtube'],['Google Maps (maps)','maps'],['Google Drive (drive)','drive'],['Crunchyroll (crunch)','crunchyroll'],['Chordify (chord)','chordify'],['X (x)','x'],['Instagram (insta)','instagram']]) {
   test('theme '+name,()=>assert.equal(getProviderTheme(name).provider,provider));
 }
@@ -51,3 +51,28 @@ test('channels have separate app, remoting and profile identities',async()=>{
   const config=JSON.parse(await readFile(new URL('../../personal/channels.json',import.meta.url)));
   for(const field of ['appName','bundleId','profileDirectory','remotingName'])assert.notEqual(config.channels.dev[field],config.channels.production[field]);
 });
+
+for (const patch of [{userTypedValue:'guitar'}, {userTypedValue:'',value:''}, {searchMode:{engineName:'YouTube'}}]) {
+  test('bare Tab stays in the address bar '+JSON.stringify(patch),()=>{
+    const t=fixture(patch);assert.equal(shouldHandleSearchTab(t.input,t.event),true);
+  });
+}
+for (const key of ['ArrowUp','ArrowDown','Enter',' ']) {
+  test('native navigation is untouched for '+key,()=>{const t=fixture();t.event.key=key;assert.equal(shouldHandleSearchTab(t.input,t.event),false);});
+}
+for (const modifier of ['shiftKey','ctrlKey','altKey','metaKey','isComposing']) {
+  test('Tab interception preserves '+modifier,()=>{const t=fixture();t.event[modifier]=true;assert.equal(shouldHandleSearchTab(t.input,t.event),false);});
+}
+test('search Tab does not intercept other browser inputs',()=>{
+  const t=fixture({sapName:'smartbar'});assert.equal(shouldHandleSearchTab(t.input,t.event),false);
+});
+for (const [name,aliases,label] of [
+  ['Chordify (chordify)',['chordify','chord'],'Chordify'],
+  ['Chordify (CHORD)',['chord'],'Chordify'],
+  ['YouTube (y)',['y'],'YouTube'],
+  ['Dictionary (English)',['dict'],'Dictionary (English)'],
+  ['Chordify', ['chordify'],'Chordify'],
+  ['Research (archive)', [], 'Research (archive)'],
+]) {
+  test('provider label '+name,()=>assert.equal(getProviderLabel(name,aliases),label));
+}

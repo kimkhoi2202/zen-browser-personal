@@ -15,11 +15,12 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from ui_patch import patch_controller
+from ui_patch import patch_controller, patch_input
 
 ROOT=Path(__file__).resolve().parents[2]
 CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
 CONTROLLER='chrome/browser/content/browser/urlbar/UrlbarChildController.mjs'
+INPUT_BASE='chrome/browser/content/browser/urlbar/UrlbarInputBase.mjs'
 ZEN_CONTROLLER='modules/zen/urlbar/ZenUrlbarController.mjs'
 HELPER='modules/zen/urlbar/PersonalSiteSearch.mjs'
 ADDITIONAL_UI={
@@ -91,6 +92,7 @@ def build(base,channel,identity,output):
         extract_archive(archive,extracted)
         original=(extracted/CONTROLLER).read_text()
         (extracted/CONTROLLER).write_text(patch_controller(original))
+        (extracted/INPUT_BASE).write_text(patch_input((extracted/INPUT_BASE).read_text()))
         (extracted/ZEN_CONTROLLER).write_bytes((ROOT/'src/zen/urlbar/ZenUrlbarController.mjs').read_bytes())
         (extracted/HELPER).write_bytes((ROOT/'src/zen/urlbar/PersonalSiteSearch.mjs').read_bytes())
         for destination,source in ADDITIONAL_UI.items():

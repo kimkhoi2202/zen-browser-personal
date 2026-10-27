@@ -14,7 +14,8 @@ Source mapping:
 - scripts/personal/build_macos.py: reproducible signed macOS artifact creation.
 - personal/launcher.c: native app/profile isolation launcher.
 - personal/entitlements.plist: local signing entitlement baseline.
-- scripts/personal/site_search.test.mjs: meaningful module tests.
+- scripts/personal/site_search.test.mjs: search-mode key handling and provider-label tests.
+- scripts/personal/tab_controller.test.mjs: runs the actual injected Tab branch and verifies arrow navigation.
 - scripts/personal/apply_to_engine.py: controller overlay after full source import.
 - personal/README.md: design, limitations, updating and promotion instructions.
 - personal/HANDOFF.md: continuation guide, source map, commands and release state.

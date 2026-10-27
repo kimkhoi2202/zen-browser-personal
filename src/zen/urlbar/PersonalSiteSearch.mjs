@@ -2,11 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/** Exact aliases take priority only before the user navigates suggestions. */
-export function getKeywordTabEngine(input, view, event) {
-  if (input.sapName != "urlbar" || input.searchMode || event.key != "Tab" ||
-      event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
-      event.isComposing || view.selectedRowIndex > 0 ||
+export function shouldHandleSearchTab(input, event) {
+  return input.sapName == "urlbar" && event.key == "Tab" &&
+    !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey &&
+    !event.isComposing;
+}
+
+/** A typed alias wins even after navigating suggestions with the arrow keys. */
+export function getKeywordTabEngine(input, event) {
+  if (!shouldHandleSearchTab(input, event) || input.searchMode ||
       !input.controller.engineStore.initialized) {
     return null;
   }
@@ -18,6 +22,13 @@ export function getKeywordTabEngine(input, view, event) {
     engine.aliases?.some(alias => alias.toLowerCase() == keyword.toLowerCase())
   );
   return matches.length == 1 ? matches[0] : null;
+}
+
+export function getProviderLabel(engineName, aliases = []) {
+  const suffix = engineName?.match(/^(.*?)\s+\(([^()]+)\)$/u);
+  return suffix && aliases.some(alias => alias.toLowerCase() == suffix[2].toLowerCase())
+    ? suffix[1].trimEnd()
+    : engineName;
 }
 
 export const PROVIDER_THEMES = [

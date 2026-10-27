@@ -1,7 +1,7 @@
 {
   "upstream": {"repository":"zen-browser/desktop","tag":"1.23.4b","commit":"541ee55196395ee8082862b83c84c90ab41d9f6d"},
   "fork": "kimkhoi2202/zen-browser-personal",
-  "revision": "personal.3",
+  "revision": "personal.4",
   "channels": {
     "dev": {"appName":"Zen Dev","bundleId":"com.kimkhoi.zen.dev","profileDirectory":"Dev","remotingName":"zen-personal-dev"},
     "production": {"appName":"Zen","bundleId":"com.kimkhoi.zen","profileDirectory":"Production","remotingName":"zen-personal"}

@@ -70,10 +70,12 @@ Zen's existing Sidebar and Top Toolbar layout. The command rows, browser actions
 compact-mode behavior, localization and settings UI are Zen's existing components.
 
 Bare Tab on an exact configured search alias enters that engine's native search
-mode. User-typed text wins over autocomplete. Unknown aliases, an already
-selected lower suggestion, modifier combinations, existing search mode and
-ordinary webpage Tab preserve native handling. Empty Tab still opens commands;
-Space and Up/Down remain available.
+mode. User-typed text wins over autocomplete and highlighted suggestions.
+Bare Tab stays in the address bar without cycling suggestions, including when
+site search is already active. Up/Down retain native suggestion navigation.
+Empty Tab still opens commands. Modifiers, IME and webpage Tab retain native
+handling. Redundant trailing alias labels such as Chordify (chordify) display
+as Chordify without renaming the underlying search engine.
 
 The search badge uses provider-specific, white-on-dark colors for the approved
 sites, including red YouTube, green Maps/Chordify and orange Crunchyroll. Unknown

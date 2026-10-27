@@ -1,13 +1,17 @@
 """Shared, anchor-checked changes for released artifacts and full source builds."""
-IMPORT='import { getKeywordTabEngine } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'
-BRANCH='''        const keywordEngine = getKeywordTabEngine(this.input, this.view, event);
-        if (keywordEngine) {
+IMPORT='import { getKeywordTabEngine, shouldHandleSearchTab } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'
+BRANCH='''        if (shouldHandleSearchTab(this.input, event)) {
           event.preventDefault();
           if (executeAction) {
-            this.input.search("", {
-              searchEngine: keywordEngine,
-              searchModeEntry: "typed",
-            });
+            const keywordEngine = getKeywordTabEngine(this.input, event);
+            if (keywordEngine) {
+              this.input.search("", {
+                searchEngine: keywordEngine,
+                searchModeEntry: "typed",
+              });
+            } else if (!this.input.value && !this.input.searchMode) {
+              this.window.gZenUIManager.enableCommandsMode(event);
+            }
           }
           break;
         }
@@ -25,3 +29,19 @@ def patch_controller(source):
     if source.count(anchor)!=1:
         raise RuntimeError('Upstream Tab handler changed; review the patch')
     return source.replace(anchor,anchor+BRANCH)
+
+
+def patch_input(source):
+    if 'getProviderLabel' in source:
+        raise RuntimeError('Input already contains the personal patch; use a clean base')
+    anchor='export class UrlbarInputBase extends HTMLElement {'
+    if source.count(anchor)!=1:
+        raise RuntimeError('Upstream input class changed; review the patch')
+    source=source.replace(anchor, 'import { getProviderLabel } from "resource:///modules/zen/urlbar/PersonalSiteSearch.mjs";\n\n'+anchor)
+    anchor='this._searchModeIndicatorTitle.textContent = engineName;'
+    if source.count(anchor)!=1:
+        raise RuntimeError('Upstream search badge changed; review the patch')
+    return source.replace(anchor, '''this._searchModeIndicatorTitle.textContent = getProviderLabel(
+          engineName,
+          this.controller.engineStore.getEngineByName(engineName)?.aliases
+        );''')
