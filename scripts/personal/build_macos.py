@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,15 @@ ADDITIONAL_UI={
 def run(*cmd,**kwargs):return subprocess.run([str(x) for x in cmd],check=True,**kwargs)
 
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def verify_engine_identity(app):
+    # Native messaging authenticates the running engine, not the launcher.
+    # Both must satisfy the app's Developer ID designated requirement.
+    result=run('codesign','-d','-r-',app,capture_output=True,text=True)
+    match=re.search(r'designated => (.+)',result.stdout+result.stderr)
+    if not match:raise RuntimeError('Application has no designated signing requirement')
+    run('codesign','--verify','--strict','-R','='+match.group(1),
+        app/'Contents/MacOS/zen-engine',capture_output=True)
 
 def source_metadata():
     revision=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
@@ -151,7 +161,16 @@ def build(base,channel,identity,output):
     if set(subprocess.check_output(['lipo','-archs',str(macos/'zen-personal')],text=True).split())!=set(architectures):
         raise RuntimeError('Launcher and engine architectures differ')
     run('codesign','--force','--deep','--sign',identity,'--options','runtime','--timestamp','--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
+    # --deep derives the non-bundle engine's identifier from its filename.
+    # Keep its real signed identity aligned with the app trusted by 1Password,
+    # then reseal the outer bundle without re-signing nested code again.
+    run('codesign','--force','--sign',identity,'--identifier',settings['bundleId'],
+        '--options','runtime','--timestamp','--entitlements',ROOT/'personal/entitlements.plist',
+        macos/'zen-engine',capture_output=True)
+    run('codesign','--force','--sign',identity,'--options','runtime','--timestamp',
+        '--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
     run('codesign','--verify','--deep','--strict',app,capture_output=True)
+    verify_engine_identity(app)
     report={'status':'packaged-and-signature-verified','channel':channel,'app':str(app),
             'bundle_id':settings['bundleId'],'profile_directory':'~/Library/Application Support/Zen Personal/'+settings['profileDirectory'],
             'upstream':CONFIG['upstream'],'source':source_metadata(),
@@ -160,7 +179,8 @@ def build(base,channel,identity,output):
             'base_archive_sha256':original_archive_sha,'modified_archive_sha256':sha(archive),
             'base_platform_archive_sha256':original_platform_archive_sha,'modified_platform_archive_sha256':sha(platform_archive),
             'native_tested':False,'promoted':False,'auto_updates':'disabled for custom channel; rebuild from new upstream release',
-            'signing':'local keychain identity; no private key exported','identity_fingerprint':identity}
+            'signing':'local keychain identity; no private key exported','identity_fingerprint':identity,
+            'engine_identity_matches_app':True}
     (output/'Build Manifest.json').write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report))
 
