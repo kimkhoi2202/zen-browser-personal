@@ -1,5 +1,7 @@
 # Personal Zen
 
+Public **personal.5** is available in [Releases](https://github.com/kimkhoi2202/zen-browser-personal/releases/tag/personal-1.23.4b.5). The app and DMG are signed, notarized and stapled. Build locally using [Releasing.md](Releasing.md); GitHub Actions is disabled. See Production.md for installed-app and native verification evidence. The initial-build history below predates public notarization.
+
 For another agent continuing this project, start with [HANDOFF.md](HANDOFF.md).
 The local source workspace is now `~/Documents/Zen Browser`, with `Development`
 and `Production` as separate Git worktrees.

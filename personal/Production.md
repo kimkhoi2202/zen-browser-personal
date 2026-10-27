@@ -1,3 +1,20 @@
+# Public release personal.5 — 2026-10-27
+
+Zen (Prod) personal.5 is published at:
+
+https://github.com/kimkhoi2202/zen-browser-personal/releases/tag/personal-1.23.4b.5
+
+- Packaged source: 435b8f8980d8c770922e9c7257d503a0995d2be3; tag personal-1.23.4b.5.
+- Upstream stable base remains 1.23.4b / 541ee55196395ee8082862b83c84c90ab41d9f6d, verified as the latest published release on 2026-10-27. New upstream dev keyboard changes are unreleased and were not merged into this stable artifact.
+- Production app and DMG are Developer-ID signed, Apple-notarized, stapled and Gatekeeper-accepted. Both launcher and engine have arm64 and x86_64 slices. Native smoke testing used Apple Silicon; Intel hardware testing remains pending.
+- Local checks: 77 JavaScript tests and 8 Python tests passed. Fresh-profile startup and command-bar zoom/reset were verified; the restored daily profile retained all 13 user extensions and 6 builtin components, and Chordify + Tab enters native search with a concise badge.
+- /Applications/Zen (Prod).app is updated to personal.5. Official Zen and installed Zen (Dev) remain separate; Dev is still the prior personal.4 app until separately rebuilt.
+- The daily Production profile was restored from its preserved original with matching fingerprints before launch. App/profile rollback and the temporary smoke-test profile remain privately outside Git.
+- GitHub Actions is disabled at repository level. Use scripts/personal/release_macos.py and personal/Releasing.md for future local releases. No automatic browser updater was added.
+- The release uploads only the DMG, SHA256SUMS.txt, Build.json and Source.md. Browser data, private build manifests and signing/notarization credentials are excluded.
+
+## Previous local releases
+
 # Named apps: personal.4 — 2026-10-26
 
 The user requested three distinct applications. They are now installed:

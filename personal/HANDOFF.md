@@ -5,6 +5,17 @@ is `~/Documents/Zen Browser`, with `Development` on `personal/dev` and `Producti
 on `personal/production`. Read the parent workspace's AGENTS.md/HANDOFF.md for
 machine-specific paths and the verified state after relocation.
 
+## Current public release
+
+Public release personal.5 is published and installed in Zen (Prod). See
+[Production.md](Production.md) for source, notarization, native verification and
+rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
+The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
+dev changes were deliberately excluded. Both architectures are packaged; only
+Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
+Installed Zen (Dev) is still personal.4; its source checkout includes the new
+release tools but it has not been rebuilt as part of this production release.
+
 ## Goal and implementation
 
 Maintain two app identities: **Zen (Dev)** for testing and **Zen (Prod)** for accepted
@@ -116,7 +127,7 @@ an unrelated branch's work or force-push shared release history.
 
 ## Accepted production source and updates
 
-Current release is **personal.4**, packaged from
+The previous local release was **personal.4**, packaged from
 `29706e913739653b36facb03c67a62c8b531216e` and tagged `personal-1.23.4b.4`.
 The installed apps are official Zen, Zen (Prod) and Zen (Dev). The two custom
 apps retain their existing separate profiles. Bare Tab is for site search;
@@ -161,4 +172,4 @@ promotion. Leave inherited upstream release workflows disabled in this fork.
 1Password needs its actual browser integration checked for the production
 signing identity. Passkeys, DRM playback, native messaging and OS link routing
 remain separate integration checks; a copied cookie database or valid signature
-does not prove them. The app is Developer-ID signed but not Apple notarized.
+does not prove them. The historical local candidates were not Apple-notarized; public personal.5 is signed, notarized and stapled.
