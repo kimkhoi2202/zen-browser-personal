@@ -22,8 +22,10 @@ dev changes were deliberately excluded. Both architectures are packaged; only
 Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
 Installed Zen (Dev) is now a signed personal.7 responsive extension-list preview;
 see [Add-ons Layout.md](Add-ons%20Layout.md) for source and exact verification limits.
-Prod includes that layout; public stays personal.6. Copy URL is on the right, before site controls, with
-spacing unchanged. See Production.md for the 1Password trust refresh and the
+Prod includes that layout; public stays personal.6. At the user's request,
+personal.9 restores the original Copy URL position and removes its packaging
+override. The tracked URL stylesheet matches the pinned upstream file exactly.
+See Production.md for local installation status and the 1Password trust refresh and the
 personal.8 follow-up in 1Password Integration.md.
 
 ## Goal and implementation

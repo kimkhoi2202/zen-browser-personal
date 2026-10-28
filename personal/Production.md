@@ -1,3 +1,19 @@
+# Prepared local personal.9 — installation pending
+
+The user requested restoring the original Copy URL position and source. Runtime
+3dcdc7a7cc6f90f096c9c83e23cf32b81afa9ca7 restores the complete URL stylesheet to
+pinned upstream and removes its custom packaging override. All 88 checks pass;
+the candidate stylesheet matches the official app byte for byte. Existing custom
+commands, site search, extension grid and 1Password signing correction remain.
+
+Candidate: Development/dist/url-revert-personal.9-prod/Zen (Prod).app. It is
+Developer-ID signed, Apple-notarized, stapled and Gatekeeper accepted. Private
+staging: Zen Personal/Backups/Original URL 2026-10-27 personal.9/Ready Zen (Prod).app.
+The user is still using Prod and explicitly deferred restart until they say it is
+closed. No personal.9 profile backup or installation has happened. Installed Prod
+is still personal.8. Complete a fresh closed-profile backup and native toolbar
+verification before promotion. No push, public tag or download was created.
+
 # Local production personal.8 — 2026-10-27
 
 Installed Zen (Prod) personal.8 is a local-only update from runtime source

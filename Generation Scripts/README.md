@@ -7,7 +7,7 @@ daily use, alongside the untouched official Zen app, keyword-plus-Tab search and
 Source mapping:
 - src/zen/common/styles/zen-addons-grid.css: responsive extension-list columns; appended to the toolkit stylesheet by ui_patch.py in both build paths.
 - scripts/personal/addons_fixture.py: creates an ignored local HTML preview from the candidate's actual stylesheet, with sample cards at four widths; it never reads or installs extensions. Run with --app 'path/to/Zen (Dev).app' --output dist/addons-layout-preview.html, then open that file in Dev. PASS labels report native layout geometry and overflow.
-- src/zen/common/styles/zen-omnibox.css: native URL-bar control order; packaged by build_macos.py.
+- src/zen/common/styles/zen-omnibox.css: restored byte for byte to the pinned upstream version for personal.9. build_macos.py preserves the official app's original stylesheet and no longer overlays it to reposition Copy URL.
 - src/zen/urlbar/PersonalSiteSearch.mjs: exact alias activation and badge colors.
 - src/zen/urlbar/PersonalCommandActions.mjs: native command descriptors and matching.
 - scripts/personal/commands.test.mjs: native action, visibility and matching checks.
