@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from ui_patch import patch_controller, patch_input, patch_addons_styles, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE
+from ui_patch import patch_controller, patch_input, patch_addons_styles, patch_findbar_position, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE, CONTENT_AREA_CSS_ARCHIVE
 
 ROOT=Path(__file__).resolve().parents[2]
 CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
@@ -110,6 +110,8 @@ def build(base,channel,identity,output):
         (extracted/HELPER).write_bytes((ROOT/'src/zen/urlbar/PersonalSiteSearch.mjs').read_bytes())
         for destination,source in ADDITIONAL_UI.items():
             (extracted/destination).write_bytes((ROOT/source).read_bytes())
+        content_area=extracted/CONTENT_AREA_CSS_ARCHIVE
+        content_area.write_text(patch_findbar_position(content_area.read_text()))
         defaults=extracted/'defaults/preferences/firefox.js'
         prefs=defaults.read_text();anchor='pref("zen.view.use-single-toolbar", true);'
         if prefs.count(anchor)!=1:raise RuntimeError('Review upstream toolbar default before packaging')

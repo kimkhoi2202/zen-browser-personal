@@ -2,6 +2,27 @@
 ADDONS_CSS_ARCHIVE='chrome/toolkit/content/mozapps/extensions/aboutaddons.css'
 ADDONS_CSS_SOURCE='src/zen/common/styles/zen-addons-grid.css'
 ADDONS_CSS_MARKER='/* Personal Zen: responsive extension list. */'
+CONTENT_AREA_CSS_ARCHIVE='chrome/browser/skin/classic/browser/tabbrowser/content-area.css'
+
+
+def patch_findbar_position(source):
+    # Swap only the findbar/page rows and their sizing. Notifications, responsive
+    # design mode and all docked DevTools areas keep their native grid positions.
+    prefix='    "devtools-side-start      devtools-side-start-splitter '
+    suffix=' devtools-side-end-splitter  devtools-side-end"'
+    browser=prefix+'browserstack            '+suffix+'\n'
+    findbar=prefix+'findbar                 '+suffix+'\n'
+    tracks='''    /* browserstack, we want to take all the available height */
+    minmax(var(--content-area-min-size), 1fr)
+    /* findbar */
+    auto'''
+    top_tracks='''    /* findbar */
+    auto
+    /* browserstack, we want to take all the available height */
+    minmax(var(--content-area-min-size), 1fr)'''
+    if source.count(browser+findbar)!=1 or source.count(tracks)!=1:
+        raise RuntimeError('Upstream findbar layout changed or already patched; use a clean base')
+    return source.replace(browser+findbar,findbar+browser).replace(tracks,top_tracks)
 
 
 def patch_addons_styles(source, styles):
