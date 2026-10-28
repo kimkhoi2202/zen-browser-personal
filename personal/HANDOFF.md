@@ -7,6 +7,13 @@ machine-specific paths and the verified state after relocation.
 
 ## Current public release
 
+Installed Zen (Dev) is now signed personal.11 with the native Find bar above page
+content and the original Copy URL placement restored. HTML/PDF native checks pass.
+See [Find Bar.md](Find%20Bar.md). The combined Prod candidate is notarized and
+staged; installation waits for the user's promised closed-Prod reply. Installed
+Prod remains personal.8 and public remains personal.6. Do not install the older
+personal.9/10 candidates or publish the new one.
+
 Local-only personal.8 is installed and corrects the running engine's signing
 identity for 1Password; see [1Password Integration.md](1Password%20Integration.md).
 The native desktop connection passes, including after a Prod restart. The user
@@ -20,7 +27,7 @@ rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
 The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
 dev changes were deliberately excluded. Both architectures are packaged; only
 Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
-Installed Zen (Dev) is now a signed personal.7 responsive extension-list preview;
+Installed Zen (Dev) personal.11 also includes the responsive extension-list layout;
 see [Add-ons Layout.md](Add-ons%20Layout.md) for source and exact verification limits.
 Prod includes that layout; public stays personal.6. At the user's request,
 personal.9 restores the original Copy URL position and removes its packaging

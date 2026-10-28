@@ -1,4 +1,21 @@
-# Prepared local personal.9 — installation pending
+# Prepared local personal.11 — installation pending
+
+The combined update restores the original Copy URL position and places only the
+native Command-F bar below the browser toolbar, above page content. Runtime source
+4ffb74b3 retains the shared bottom area for Zen's Zap bar and existing DevTools
+areas. See Find Bar.md for source mapping and native HTML/PDF verification in the
+installed signed Dev personal.11 app. All 88 focused checks pass.
+
+Candidate: Development/dist/findbar-personal.11-prod/Zen (Prod).app. It is signed,
+Apple-notarized, stapled and Gatekeeper accepted. Private verified staging:
+Zen Personal/Backups/Top Findbar Production 2026-10-27 personal.11/Ready Zen (Prod).app.
+It supersedes personal.9/10. Installed Prod is still personal.8; no new Prod
+profile backup or installation has occurred. The user is using Prod and will
+tell us when it is closed. Do not quit it, replace it or publish the update until
+the corresponding user instruction. After closure, preserve and verify its daily
+profile/app before installing, then perform native toolbar/Find verification.
+
+# Earlier prepared local personal.9 — superseded by personal.11
 
 The user requested restoring the original Copy URL position and source. Runtime
 3dcdc7a7cc6f90f096c9c83e23cf32b81afa9ca7 restores the complete URL stylesheet to
