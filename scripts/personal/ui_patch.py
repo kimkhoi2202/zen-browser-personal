@@ -6,23 +6,21 @@ CONTENT_AREA_CSS_ARCHIVE='chrome/browser/skin/classic/browser/tabbrowser/content
 
 
 def patch_findbar_position(source):
-    # Swap only the findbar/page rows and their sizing. Notifications, responsive
-    # design mode and all docked DevTools areas keep their native grid positions.
+    # Give native Find a separate auto-sized row. Zen's Zap bar still uses the
+    # existing bottom findbar area; notifications and DevTools keep their slots.
     prefix='    "devtools-side-start      devtools-side-start-splitter '
     suffix=' devtools-side-end-splitter  devtools-side-end"'
     browser=prefix+'browserstack            '+suffix+'\n'
-    findbar=prefix+'findbar                 '+suffix+'\n'
-    tracks='''    /* browserstack, we want to take all the available height */
-    minmax(var(--content-area-min-size), 1fr)
-    /* findbar */
-    auto'''
-    top_tracks='''    /* findbar */
-    auto
-    /* browserstack, we want to take all the available height */
-    minmax(var(--content-area-min-size), 1fr)'''
-    if source.count(browser+findbar)!=1 or source.count(tracks)!=1:
+    top=prefix+'personal-findbar         '+suffix+'\n'
+    tracks='    /* browserstack, we want to take all the available height */\n'
+    item='''  & > findbar {
+    grid-area: findbar;
+  }'''
+    if 'personal-findbar' in source or any(source.count(x)!=1 for x in (browser,tracks,item)):
         raise RuntimeError('Upstream findbar layout changed or already patched; use a clean base')
-    return source.replace(browser+findbar,findbar+browser).replace(tracks,top_tracks)
+    return (source.replace(browser,top+browser)
+            .replace(tracks,'    /* Native Find above the page; the shared bottom slot stays intact. */\n    auto\n'+tracks)
+            .replace(item,item.replace('grid-area: findbar;','grid-area: personal-findbar;')))
 
 
 def patch_addons_styles(source, styles):
