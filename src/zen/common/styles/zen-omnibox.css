@@ -178,7 +178,7 @@
   gap: 2px;
 
   & #zen-copy-url-button {
-    order: 998;
+    order: -1;
   }
 
   & #identity-box {
