@@ -7,33 +7,25 @@ machine-specific paths and the verified state after relocation.
 
 ## Current public release
 
-Installed Zen (Dev) is now signed personal.11 with the native Find bar above page
-content and the original Copy URL placement restored. HTML/PDF native checks pass.
-See [Find Bar.md](Find%20Bar.md). The combined Prod candidate is notarized and
-staged; installation waits for the user's promised closed-Prod reply. Installed
-Prod remains personal.8 and public remains personal.6. Do not install the older
-personal.9/10 candidates or publish the new one.
+Installed Zen (Prod) and Zen (Dev) are personal.11. Prod is Developer-ID signed,
+Apple-notarized and stapled; Dev is signed but not notarized. Prod's native Find
+bar is above page content and Copy URL is restored to the vendor position. The
+responsive extension grid and corrected 1Password engine identity remain. See
+[Find Bar.md](Find%20Bar.md), [Production.md](Production.md) and the parent handoff.
 
-Local-only personal.8 is installed and corrects the running engine's signing
-identity for 1Password; see [1Password Integration.md](1Password%20Integration.md).
-The native desktop connection passes, including after a Prod restart. The user
-confirmed actual Touch ID unlock after a manual lock and that the warning is gone.
-The responsive extension grid and real menu/details/toggle checks also pass.
-Do not publish this update.
+The 2026-10-28 installation preserved all 17,951 closed-profile fingerprints and
+13 user extensions. Native Prod HTML Find and toolbar placement pass. Further
+interaction stopped when another task/user changed the active tab; PDF and
+next/previous retests are only claimed for Dev. All 88 focused checks passed for
+this runtime. Intel hardware and docked DevTools remain untested. Production is
+promoted locally; public remains personal.6. No GitHub push/tag/release was made.
+Do not install superseded personal.9/10 candidates or publish without instruction.
 
-Public release personal.6 remains published; local Prod is newer personal.8. See
-[Production.md](Production.md) for source, notarization, native verification and
-rollback evidence, and [Releasing.md](Releasing.md) for the local-only pipeline.
-The current stable upstream is 1.23.4b as checked on 2026-10-27. Unreleased upstream
-dev changes were deliberately excluded. Both architectures are packaged; only
-Apple Silicon hardware has been tested. GitHub Actions is disabled in this fork.
-Installed Zen (Dev) personal.11 also includes the responsive extension-list layout;
-see [Add-ons Layout.md](Add-ons%20Layout.md) for source and exact verification limits.
-Prod includes that layout; public stays personal.6. At the user's request,
-personal.9 restores the original Copy URL position and removes its packaging
-override. The tracked URL stylesheet matches the pinned upstream file exactly.
-See Production.md for local installation status and the 1Password trust refresh and the
-personal.8 follow-up in 1Password Integration.md.
+Read [1Password Integration.md](1Password%20Integration.md) for the accepted
+personal.8 signing fix and the user's prior Touch ID confirmation. This CSS update
+retains its app/engine signing requirement and does not change browser trust.
+The stable upstream base remains 1.23.4b (last checked 2026-10-27); custom updates
+remain manual. Official Zen and each custom profile stay separate.
 
 ## Goal and implementation
 

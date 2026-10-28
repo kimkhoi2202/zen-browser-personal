@@ -33,16 +33,19 @@ Verification.json. The Dev app is signed but not notarized; its prior app and
 verified closed-profile copy are privately under Zen Personal/Backups/Top Findbar
 Final 2026-10-27 personal.11.
 
-Prod candidate: dist/findbar-personal.11-prod/Zen (Prod).app. It is signed,
-Apple-notarized, stapled and Gatekeeper accepted. A verified staging copy is under
-Zen Personal/Backups/Top Findbar Production 2026-10-27 personal.11. This supersedes
-the personal.9 and personal.10 candidates. It includes the Copy URL revert,
-responsive extension grid and corrected engine signing identity for 1Password.
+Zen (Prod) personal.11 was installed on 2026-10-28 after the user's closed-Prod
+reply. The notarized candidate is in dist/findbar-personal.11-prod; the private
+Ready staging app was moved into /Applications/Zen (Prod).app. The app includes
+the original Copy URL revert, responsive grid and corrected 1Password identity.
+All signature, engine identity, staple and Gatekeeper checks pass. Before launch,
+all 17,951 daily-profile file fingerprints matched the fresh snapshot, and 13
+active user extensions remained active afterward. Native Prod HTML Find showed
+2 of 53 matches with the bar above content; original Copy URL placement was
+visually verified. Other activity changed the active tab, so Prod PDF and match
+navigation were not retested; those had passed in Dev for this runtime.
 
-Installed Prod remains personal.8. The user explicitly deferred restart until
-they tell us it is closed. Do not quit/replace Prod until that reply. Then take a
-fresh verified closed-profile backup, preserve its app, install the personal.11
-candidate and verify its toolbar and Find bar natively. No GitHub publication or
-source push is authorized. Production worktree stays at accepted personal.8 until
-that promotion is complete. Intel hardware and docked-DevTools behavior have not
-been exercised natively; their existing grid areas are retained in the patch.
+Private rollback is under Zen Personal/Backups/Top Findbar Production 2026-10-27
+personal.11 (Previous Zen (Prod).app, Production Profile Before Install, private
+fingerprints and Installation.json). Personal.9/10 are superseded and must not be
+installed. Public stays personal.6; no push/tag/release is authorized. Intel and
+docked DevTools have not been exercised natively; existing grid areas are retained.

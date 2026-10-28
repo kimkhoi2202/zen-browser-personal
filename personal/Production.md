@@ -1,19 +1,34 @@
-# Prepared local personal.11 — installation pending
+# Installed local personal.11 — 2026-10-28
 
-The combined update restores the original Copy URL position and places only the
-native Command-F bar below the browser toolbar, above page content. Runtime source
-4ffb74b3 retains the shared bottom area for Zen's Zap bar and existing DevTools
-areas. See Find Bar.md for source mapping and native HTML/PDF verification in the
-installed signed Dev personal.11 app. All 88 focused checks pass.
+Zen (Prod) personal.11 is installed at /Applications/Zen (Prod).app from runtime
+4ffb74b30699a8f704f0c39cbcdf3670d89ce8eb. The native Command-F bar is below the
+browser toolbar and above page content; Copy URL uses the original vendor
+position and stylesheet. The responsive extension grid, custom commands/site
+search and 1Password engine signing correction are retained.
 
-Candidate: Development/dist/findbar-personal.11-prod/Zen (Prod).app. It is signed,
-Apple-notarized, stapled and Gatekeeper accepted. Private verified staging:
-Zen Personal/Backups/Top Findbar Production 2026-10-27 personal.11/Ready Zen (Prod).app.
-It supersedes personal.9/10. Installed Prod is still personal.8; no new Prod
-profile backup or installation has occurred. The user is using Prod and will
-tell us when it is closed. Do not quit it, replace it or publish the update until
-the corresponding user instruction. After closure, preserve and verify its daily
-profile/app before installing, then perform native toolbar/Find verification.
+The user explicitly reported Prod closed and requested installation. It was
+still running in the background, so it was quit normally through its menu.
+The current closed daily Production profile was copied and fingerprint-verified:
+all 17,951 files matched, with 13 active user extensions. The previous personal.8
+app is preserved. The daily profile stayed in place and was unchanged before
+first launch. Installed app bytes match the notarized candidate; deep/strict
+signature, full app/engine identity, stapled ticket and Gatekeeper checks pass.
+All 13 extensions remain active after launch.
+
+Native Prod verification on Apple Silicon confirmed the top Find bar on the
+local HTML fixture (2 of 53 matches) and original Copy URL position. The active
+tab then changed due to other user/task activity; further UI interaction stopped.
+Do not claim Prod PDF or next/previous retesting. Both HTML/PDF Find and match
+navigation had passed in Dev for this same runtime. All 88 focused checks passed
+before packaging; no runtime source changed during installation. Intel hardware
+and docked DevTools remain untested.
+
+Private rollback/evidence: ~/Library/Application Support/Zen Personal/Backups/
+Top Findbar Production 2026-10-27 personal.11. It contains Previous Zen (Prod).app,
+Production Profile Before Install, Profile Fingerprints.json and Installation.json.
+The Ready app was moved into Applications. Candidate and native screenshot:
+Development/dist/findbar-personal.11-prod. Dev remains signed personal.11; official
+Zen is untouched. Public remains personal.6. No GitHub push, tag or publication.
 
 # Earlier prepared local personal.9 — superseded by personal.11
 
