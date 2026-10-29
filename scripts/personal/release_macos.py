@@ -15,7 +15,7 @@ from build_macos import CONFIG, ROOT, build
 
 REPO = CONFIG['fork']
 TAG = 'personal-' + CONFIG['upstream']['tag'] + '.' + CONFIG['revision'].split('.')[-1]
-STEM = 'Zen-Prod-' + CONFIG['upstream']['tag'] + '-' + CONFIG['revision'] + '-macOS-universal'
+STEM = CONFIG['channels']['production']['appName'].replace(' ', '-') + '-' + CONFIG['upstream']['tag'] + '-' + CONFIG['revision'] + '-macOS-universal'
 FORBIDDEN = {'cookies.sqlite', 'places.sqlite', 'logins.json', 'key4.db', 'cert9.db',
              'sessionstore.jsonlz4', 'search.json.mozlz4', 'extensions.json'}
 
@@ -109,7 +109,7 @@ def notarize(output, identity, profile):
     dmg = output / (STEM + '.dmg')
     if dmg.exists():
         raise RuntimeError('Preserve the existing DMG before retrying')
-    run('hdiutil', 'create', '-volname', 'Zen (Prod)', '-srcfolder', output / 'Stage',
+    run('hdiutil', 'create', '-volname', CONFIG['channels']['production']['appName'], '-srcfolder', output / 'Stage',
         '-format', 'UDZO', '-ov', dmg)
     run('codesign', '--sign', identity, '--timestamp', dmg)
     submit_notarization(dmg, profile, output / 'DMG Notarization.json')
@@ -162,7 +162,7 @@ def publish(output, native_tested):
     (output / 'Build.json').write_text(json.dumps(report, indent=2) + '\n')
     run('gh', 'release', 'create', TAG, dmg, output / 'SHA256SUMS.txt', output / 'Build.json',
         output / 'Source.md', '--repo', REPO, '--verify-tag', '--draft',
-        '--title', 'Zen (Prod) ' + CONFIG['upstream']['tag'] + ' / ' + CONFIG['revision'],
+        '--title', CONFIG['channels']['production']['appName'] + ' ' + CONFIG['upstream']['tag'] + ' / ' + CONFIG['revision'],
         '--notes-file', output / 'Release Notes.md')
     download = output / 'Downloaded Release'
     run('gh', 'release', 'download', TAG, '--repo', REPO, '--pattern', dmg.name, '--dir', download)
@@ -176,7 +176,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase', choices=['prepare', 'notarize', 'publish'])
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--base', type=Path, default=Path('/Applications/Zen.app'))
+    parser.add_argument('--base', type=Path, default=Path('/Applications/Zen (Official).app'))
     parser.add_argument('--identity')
     parser.add_argument('--keychain-profile', default='Zen Notary')
     parser.add_argument('--native-tested', action='store_true')

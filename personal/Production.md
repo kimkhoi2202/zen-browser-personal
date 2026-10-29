@@ -1,3 +1,29 @@
+> Naming migration completed October 28, 2026. Custom Zen and Crest use the
+> plain Applications names; vendor apps use the Official suffix. Bundle IDs,
+> profile paths and Zen's default-browser association are preserved. Custom Zen
+> is signed, re-notarized, stapled and Gatekeeper accepted. Finder names and
+> custom Zen launch passed; Crest's eight Spaces and two connected 1Password
+> accounts passed. Zen's 13 active user extensions remain. The app-control
+> resolver still caches Zen's prior vendor identity, so Zen's window/1Password
+> popup was not retested after renaming. See the private manifest for evidence.
+
+# Application names — October 28, 2026
+
+The user's custom daily app is **Zen** at `/Applications/Zen.app`
+(`com.kimkhoi.zen`). The vendor app is **Zen (Official)** at
+`/Applications/Zen (Official).app` (`app.zen-browser.zen`). **Zen (Dev)** stays
+unchanged. Older sections use the former names and paths.
+
+Production still forces `~/Library/Application Support/Zen Personal/Production`;
+Dev still forces its separate Dev profile. Never rename or merge those profiles
+or bundle IDs. Build only from the verified vendor `/Applications/Zen (Official).app`,
+never the custom `/Applications/Zen.app`. Packaging defaults now use the new names.
+This naming update does not publish a release or change the personal.11 features.
+
+Private rollback, notarization and installation evidence:
+`~/Library/Application Support/Browser Naming/2026-10-28 Primary Names`.
+Read `Application Names.md` for the installed-name mapping and continuation.
+
 # Installed local personal.11 — 2026-10-28
 
 Zen (Prod) personal.11 is installed at /Applications/Zen (Prod).app from runtime

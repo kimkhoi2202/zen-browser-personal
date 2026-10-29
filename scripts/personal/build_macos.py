@@ -187,7 +187,7 @@ def build(base,channel,identity,output):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('--base',type=Path,default=Path('/Applications/Zen.app'))
+    parser.add_argument('--base',type=Path,default=Path('/Applications/Zen (Official).app'))
     parser.add_argument('--channel',choices=CONFIG['channels'],required=True)
     parser.add_argument('--identity',required=True)
     parser.add_argument('--output',type=Path)

@@ -37,7 +37,7 @@ Run from the release source checkout. Substitute an existing Developer ID identi
 and a new ignored output directory. The output path is absolute in the examples
 only for clarity; the CLI resolves relative paths too.
 
-    python3 scripts/personal/release_macos.py prepare --base '/Applications/Zen.app' --identity 'Developer ID Application: Your Name (TEAMID)' --output dist/public-personal.N
+    python3 scripts/personal/release_macos.py prepare --base '/Applications/Zen (Official).app' --identity 'Developer ID Application: Your Name (TEAMID)' --output dist/public-personal.N
     python3 scripts/personal/release_macos.py notarize --identity 'Developer ID Application: Your Name (TEAMID)' --keychain-profile 'Zen Notary' --output dist/public-personal.N
 
 Preparation runs the focused tests, packages only the clean app, audits private-data
