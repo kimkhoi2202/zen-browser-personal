@@ -24,6 +24,18 @@ Private rollback, notarization and installation evidence:
 `~/Library/Application Support/Browser Naming/2026-10-28 Primary Names`.
 Read `Application Names.md` for the installed-name mapping and continuation.
 
+# Installed Actions update — personal.13
+
+Custom Zen at /Applications/Zen.app is locally installed from runtime 49b67431.
+Its native Actions provider now includes Space/folder destinations. Read
+[Actions Mode.md](Actions%20Mode.md) for behavior and exact native test limits.
+87 Node and 11 Python checks pass. The app is signed, notarized and stapled;
+13,455 profile fingerprints matched before launch and 13 user extensions remain.
+Automatic PiP stays off; no stopped PiP candidate is included. Nothing was
+published. Installed Zen (Dev) remains personal.11; the temporary personal.13
+Dev candidate is closed and disabled, and the original Dev profile restored.
+The parent handoff records the private rollback and daily keyboard test limit.
+
 # Continuing the personal Zen fork
 
 This is the portable handoff for the personal browser code. The local workspace
