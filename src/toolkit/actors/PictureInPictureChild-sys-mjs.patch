@@ -1,5 +1,5 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..bacd6c1eb322dcc91c43c9b509b4384d140e3c7f 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..890092632b8927f22f1b0ec1f9c6719e59faa857 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
 @@ -285,6 +285,14 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
@@ -54,3 +54,20 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..bacd6c1eb322dcc91c43c9b509b4384d
            selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
          }
          this.videoWrapper.setCurrentTime(video, selectedTime);
+@@ -2652,6 +2668,16 @@ export class PictureInPictureChild extends JSWindowActorChild {
+       },
+       { once: true }
+     );
++
++    // Zen: the request's "playing" flag also requires readyState > 2, so a
++    // video that was still seeking when the player opened showed as paused,
++    // and no further "play" event comes while it keeps playing. Sync the
++    // real state once the player is set up.
++    this.sendAsyncMessage(
++      !originatingVideo.paused && !originatingVideo.ended
++        ? "PictureInPicture:Playing"
++        : "PictureInPicture:Paused"
++    );
+   }
+ 
+   #onResizeNotifyPictureInPictureWindowInstance() {
