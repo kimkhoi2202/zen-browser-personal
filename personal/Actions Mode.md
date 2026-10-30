@@ -47,10 +47,21 @@ automated coverage. A Tab sent in the same tool call immediately after Command-T
 was missed once; opening the bar before pressing Tab worked. No extra key handler
 or timing workaround was added.
 
-Production packaging is signed; Apple notarization and installation status are
-recorded separately under the parent workspace's Private/Actions Command Bar.
-The daily app has not yet been replaced. App controls timed out on its large
-accessibility tree; do not confuse that with failed Dev verification.
+Production personal.13 is now installed at /Applications/Zen.app from runtime
+49b67431. It is Developer-ID signed, notarized, stapled and Gatekeeper accepted.
+All 13,455 closed-profile fingerprints matched before launch; 13 active user
+extensions remain. The previous app and closed profile are preserved privately.
+The installed app showed the native Actions chip, real Space/folder destinations
+and moved a disposable about:robots tab into Stanford. That tab was closed,
+the original Money Space and ChatGPT page restored, and automatic PiP remains
+off. No real user tab was moved or pinned.
+
+Daily app controls initially timed out, then recovered. Background Enter did
+not engage reliably during the final daily check; the synthetic move was
+completed through the native result click. Keyboard execution, arrows and Tab
+passed in Dev; do not describe the daily Enter check as passed. No timing hack
+or unrelated key-handler change was added on the basis of the control tool.
+Private/Actions Command Bar holds Installation.json and verification evidence.
 
 Official reference: https://start.arc.net/command-bar-actions
 
