@@ -1,5 +1,5 @@
 diff --git a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
-index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf95be3e7f 100644
+index aeb057b0b715ad587c4807832edc217583382d2f..4592e24b8b0a4945cbb18ac078bc4b5415957ec6 100644
 --- a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
 +++ b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
 @@ -19,6 +19,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
@@ -10,7 +10,18 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
  });
  
  import { Rect, Point } from "resource://gre/modules/Geometry.sys.mjs";
-@@ -140,6 +141,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -127,6 +128,10 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+         if (!lazy.PIP_ENABLED || !lazy.PIP_WHEN_SWITCHING_TABS) {
+           break;
+         }
++        // Zen: the tab may already be gone (closing tab/window).
++        if (!browser?.documentGlobal?.gBrowser) {
++          break;
++        }
+ 
+         // Suppress auto-toggle if the user deliberately closed this PiP window
+         if (
+@@ -140,6 +145,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
          if (browser.documentGlobal.gBrowser.selectedBrowser == browser) {
            break;
          }
@@ -20,7 +31,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
          let actor = browsingContext.currentWindowGlobal.getActor(
            "PictureInPictureLauncher"
          );
-@@ -222,6 +226,7 @@ export class PictureInPictureParent extends JSWindowActorParent {
+@@ -222,6 +230,7 @@ export class PictureInPictureParent extends JSWindowActorParent {
          if (player) {
            player.setTimestamp(timestamp);
            player.setScrubberPosition(scrubberPosition);
@@ -28,7 +39,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
          }
          break;
        }
-@@ -474,6 +479,7 @@ export var PictureInPicture = {
+@@ -474,6 +483,7 @@ export var PictureInPicture = {
        for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
          if (this.weakWinToBrowser.get(win) === event.target.linkedBrowser) {
            this.weakWinToBrowser.set(win, otherTab.linkedBrowser);
@@ -36,7 +47,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
            this.removePiPBrowserFromWeakMap(event.target.linkedBrowser);
            this.removeOriginatingWinFromWeakMap(event.target.linkedBrowser);
            this.addPiPBrowserToWeakMap(otherTab.linkedBrowser);
-@@ -572,7 +578,7 @@ export var PictureInPicture = {
+@@ -572,7 +582,7 @@ export var PictureInPicture = {
      // focus the tab's window
      tab.documentGlobal.focus();
  
@@ -45,7 +56,50 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
      await this.closeSinglePipWindow({ reason: "Unpip", actorRef: pipActor });
    },
  
-@@ -1087,6 +1093,8 @@ export var PictureInPicture = {
+@@ -950,8 +960,7 @@ export var PictureInPicture = {
+       }
+     }
+ 
+-    this.removePiPBrowserFromWeakMap(this.weakWinToBrowser.get(win));
+-    this.weakAutoPipBrowserToParent.delete(this.weakWinToBrowser.get(win));
++    this.releasePlayerBrowser(win);
+ 
+     Glean.pictureinpicture["closedMethod" + reason].record();
+     await this.closePipWindow(win);
+@@ -1032,6 +1041,22 @@ export var PictureInPicture = {
+   async handlePictureInPictureRequest(wgp, videoData) {
+     const isApiRequest = !!videoData.isPipApiRequest;
+ 
++    // Zen: an automatic request (the tab was backgrounded) can arrive after
++    // the user already switched back to it; never open a stale player then.
++    const requestingBrowser = wgp.browsingContext.top.embedderElement;
++    const isAutoRequest =
++      lazy.PIP_WHEN_SWITCHING_TABS &&
++      !isApiRequest &&
++      (videoData.isAutoPip ?? !requestingBrowser.docShellIsActive);
++    const isBrowserSelected = () =>
++      requestingBrowser.getTabBrowser()?.selectedBrowser == requestingBrowser;
++    if (isAutoRequest && isBrowserSelected()) {
++      return;
++    }
++    if (isAutoRequest) {
++      this.closeOtherAutoPipWindows(requestingBrowser);
++    }
++
+     if (isApiRequest) {
+       await this.closeApiPipWindowIfOpen();
+     }
+@@ -1072,6 +1097,9 @@ export var PictureInPicture = {
+ 
+     this.weakWinToBrowser.set(win, browser);
+     this.addPiPBrowserToWeakMap(browser);
++    // Zen: this player now holds one count on its browser; released exactly
++    // once by releasePlayerBrowser().
++    win._zenHoldsBrowserCount = true;
+     this.addOriginatingWinToWeakMap(browser);
+     if (lazy.PIP_WHEN_SWITCHING_TABS && !browser.docShellIsActive) {
+       // The docshell would only not be active when the video was pip'd via auto toggle
+@@ -1087,6 +1115,8 @@ export var PictureInPicture = {
      win.setTimestamp(videoData.timestamp);
      win.setVolume(videoData.volume);
      win.setPlaybackRate(videoData.playbackRate);
@@ -54,7 +108,77 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
  
      Services.prefs.setBoolPref(TOGGLE_HAS_USED_PREF, true);
  
-@@ -1270,6 +1278,19 @@ export var PictureInPicture = {
+@@ -1100,6 +1130,57 @@ export var PictureInPicture = {
+       webVTTSubtitles: videoData.webVTTSubtitles,
+     });
+     await setupPromise;
++
++    // Zen: the user came back to the tab while the player was opening.
++    if (isAutoRequest && isBrowserSelected()) {
++      await this.closeSinglePipWindow({ reason: "Foregrounded", actorRef });
++    }
++  },
++
++  /**
++   * Zen: drops the player's count on its originating browser (and its
++   * automatic-PiP association) exactly once.
++   *
++   * @param {Window} win The player window.
++   */
++  releasePlayerBrowser(win) {
++    if (!win._zenHoldsBrowserCount) {
++      return;
++    }
++    win._zenHoldsBrowserCount = false;
++    let browser = this.weakWinToBrowser.get(win);
++    if (!browser) {
++      return;
++    }
++    this.removePiPBrowserFromWeakMap(browser);
++    let autoActor = this.weakAutoPipBrowserToParent.get(browser);
++    if (autoActor && this.weakPipToWin.get(autoActor) == win) {
++      this.weakAutoPipBrowserToParent.delete(browser);
++    }
++  },
++
++  /**
++   * Zen: only one automatic player at a time. When another video tab is
++   * backgrounded, the previous automatic player closes and its video pauses,
++   * so nothing keeps playing unseen. Manually opened players are untouched.
++   *
++   * @param {Browser} exceptBrowser The browser about to get the new player.
++   */
++  closeOtherAutoPipWindows(exceptBrowser) {
++    for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
++      let browser = this.weakWinToBrowser.get(win);
++      if (!browser || browser == exceptBrowser || win.closed) {
++        continue;
++      }
++      let actorRef = this.weakAutoPipBrowserToParent.get(browser);
++      if (!actorRef) {
++        continue;
++      }
++      actorRef.sendAsyncMessage("PictureInPicture:Pause", {
++        reason: "pip-closed",
++      });
++      this.closeSinglePipWindow({ reason: "Foregrounded", actorRef });
++    }
+   },
+ 
+   /**
+@@ -1143,6 +1224,11 @@ export var PictureInPicture = {
+     }
+ 
+     let browser = this.weakWinToBrowser.get(window);
++    // Zen: a player can also go away without closeSinglePipWindow (e.g. its
++    // window closed directly). Without this the tab stayed an "originating"
++    // browser forever: its docShell stayed active and automatic PiP never
++    // triggered for it again.
++    this.releasePlayerBrowser(window);
+     this.removeOriginatingWinFromWeakMap(browser);
+ 
+     this.currentPlayerCount -= 1;
+@@ -1270,6 +1356,19 @@ export var PictureInPicture = {
  
      const isPlayer = requestingWin.document.location.href == PLAYER_URI;
  
@@ -74,7 +198,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..b19ef11f285f701bba6ebadae76aeacf
      let requestingCssToDesktopScale =
        requestingWin.devicePixelRatio / requestingWin.desktopToDeviceScale;
  
-@@ -1611,6 +1632,12 @@ export var PictureInPicture = {
+@@ -1611,6 +1710,12 @@ export var PictureInPicture = {
        return;
      }
  

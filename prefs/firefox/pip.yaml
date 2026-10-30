@@ -5,6 +5,8 @@
 - name: media.videocontrols.picture-in-picture.video-toggle.enabled
   value: true
 
-# TODO: Enable once we have a proper settings page
+# Arc-style automatic Picture-in-Picture: a playing, audible video pops out
+# when its tab (or Space) is left and returns inline when the tab is selected
+# again.
 - name: media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled
-  value: false
+  value: true

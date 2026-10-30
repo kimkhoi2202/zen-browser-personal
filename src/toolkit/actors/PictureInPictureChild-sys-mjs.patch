@@ -1,11 +1,15 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..86a0f8802aa07e8c678b5182af1de8386da2b429 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..bacd6c1eb322dcc91c43c9b509b4384d140e3c7f 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
-@@ -285,6 +285,10 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -285,6 +285,14 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        volume: PictureInPictureChild.videoWrapper.getVolume(video),
        playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
        autoFocus,
++      // Zen: whether this request comes from leaving the tab (automatic PiP),
++      // so the parent does not have to guess from the docShell state (an
++      // occluded window deactivates the selected tab's docShell too).
++      isAutoPip: reason == "AutoPip",
 +      // Zen: numeric position for the native timeline.
 +      currentTime: PictureInPictureChild.videoWrapper.getCurrentTime(video),
 +      duration: PictureInPictureChild.videoWrapper.getDuration(video),
@@ -13,7 +17,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..86a0f8802aa07e8c678b5182af1de838
      });
  
      // Some tests don't bother setting a reason.
-@@ -346,6 +350,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -346,6 +354,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        if (
          video &&
          PictureInPictureChild.videoIsPlaying(video) &&
@@ -21,7 +25,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..86a0f8802aa07e8c678b5182af1de838
          PictureInPictureChild.videoIsPiPEligible(video)
        ) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
-@@ -2181,6 +2186,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2181,6 +2190,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
              {
                scrubberPosition,
                timestamp,
@@ -32,7 +36,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..86a0f8802aa07e8c678b5182af1de838
              }
            );
          }
-@@ -2291,12 +2300,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2291,12 +2304,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
          let selectedTime;
          let video = this.getWeakVideo();
          let currentTime = this.videoWrapper.getCurrentTime(video);
