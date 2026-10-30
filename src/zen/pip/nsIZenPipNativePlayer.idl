@@ -1,0 +1,94 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+interface mozIDOMWindowProxy;
+
+/**
+ * @brief Receives user intents from the native Picture-in-Picture controls.
+ * Calls are always asynchronous (dispatched after the native event that
+ * caused them has finished), so the listener may close the player.
+ */
+[scriptable, function, uuid(5d0f5c2e-3a61-4d5f-9b1e-0f6f3d7d2a41)]
+interface nsIZenPipNativeControlsListener : nsISupports {
+  /**
+   * @param action See ZenPipNativeChrome.h for the list of actions.
+   * @param value Numeric argument (seconds, position, rate, key code...).
+   * @param detail Optional string/JSON argument.
+   */
+  void onAction(in ACString action, in double value, in AUTF8String detail);
+};
+
+/**
+ * @brief Native macOS chrome attached to one Picture-in-Picture player window:
+ * Liquid Glass controls plus the window's motion and display containment.
+ */
+[scriptable, uuid(2b8c4f71-7d0e-4a6b-8a35-6c1f0b9e7c53)]
+interface nsIZenPipNativeControls : nsISupports {
+  void setPlaying(in boolean playing);
+  void setMuted(in boolean muted);
+  void setPlaybackRate(in double rate);
+  /**
+   * @param currentTime Seconds.
+   * @param duration Seconds; NaN/Infinity when unknown or live.
+   */
+  void setTimeline(in double currentTime, in double duration,
+                   in boolean seekable, in boolean live);
+  void setCaptions(in boolean available, in boolean enabled);
+  void setCaptionSize(in ACString size);
+  /** @param stringsJSON Object of localized labels keyed by control. */
+  void setStrings(in AUTF8String stringsJSON);
+  void setVideoSize(in double width, in double height);
+  /** The browser window hosting the source tab, or null. */
+  void setSourceWindow(in mozIDOMWindowProxy sourceWindow);
+  /** @param configJSON Motion and visibility tunables. */
+  void setConfiguration(in AUTF8String configJSON);
+
+  void revealControls(in boolean sticky);
+  void focusControls();
+  void minimize();
+  void restore();
+
+  /** JSON snapshot of the native state, for tests and diagnostics. */
+  readonly attribute AUTF8String debugState;
+
+  /** Test hooks driving the real native code paths. */
+  void testDrag(in double dx, in double dy, in double durationSeconds,
+                in double releaseVelocityX, in double releaseVelocityY);
+  void testResize(in ACString handle, in double dx, in double dy);
+  boolean testClick(in ACString control);
+  /** Sends a key-down (macOS key code, characters, NSEvent modifier flags)
+   *  through the player window's normal event dispatch. */
+  void testKey(in unsigned short keyCode, in AUTF8String characters,
+               in unsigned long modifiers);
+
+  /** Removes the native chrome. Idempotent; also happens on window close. */
+  void destroy();
+};
+
+[scriptable, uuid(8f2e9a10-64c7-4b5e-a0d3-3e7b51c2f9a8)]
+interface nsIZenPipNativePlayer : nsISupports {
+  /** True on macOS, where the native chrome is implemented. */
+  readonly attribute boolean isSupported;
+  /** True when Apple's Liquid Glass (macOS 26+) materials are available. */
+  readonly attribute boolean hasLiquidGlass;
+
+  nsIZenPipNativeControls attach(in mozIDOMWindowProxy playerWindow,
+                                 in nsIZenPipNativeControlsListener listener);
+
+  /**
+   * Initial player frame for a video opened from `sourceWindow`, in desktop
+   * pixels (top-left origin, like screenX/screenY): fully inside the usable
+   * area of the display holding the source window, restoring the last
+   * placement when given.
+   *
+   * @param placementJSON {dock, fx, fy, width} from a previous player, or "".
+   * @returns [left, top, width, height]
+   */
+  Array<double> initialFrame(in mozIDOMWindowProxy sourceWindow,
+                             in double videoWidth, in double videoHeight,
+                             in AUTF8String placementJSON,
+                             in double edgeGap);
+};

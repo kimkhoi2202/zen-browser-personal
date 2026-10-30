@@ -1,0 +1,48 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# Native macOS Picture-in-Picture chrome (Liquid Glass controls, physical
+# window motion, display containment). When false, or off macOS, the player
+# keeps the stock HTML controls.
+- name: zen.pip.native-controls.enabled
+  value: true
+
+# Gap (points) kept between the player and the edges of the usable display
+# area (menu bar and Dock excluded).
+- name: zen.pip.edge-gap
+  value: 14
+
+# Glide spring: undamped period in ms and damping ratio in percent (100 is
+# critically damped, lower allows a slight settle).
+- name: zen.pip.motion.response-ms
+  value: 420
+
+- name: zen.pip.motion.damping-percent
+  value: 86
+
+# Throw projection: per-millisecond deceleration (per mille). 998 matches the
+# "normal" scroll deceleration on Apple platforms.
+- name: zen.pip.motion.deceleration-per-mille
+  value: 998
+
+# Releases slower than this (points/second) are placements, faster ones are
+# throws toward a corner.
+- name: zen.pip.motion.flick-speed
+  value: 320
+
+# Slow placements this close (points) to an edge snap onto it.
+- name: zen.pip.motion.magnet-distance
+  value: 36
+
+# Two-finger trackpad scrolling over the player carries it like a drag.
+- name: zen.pip.motion.two-finger-carry
+  value: true
+
+# Controls recede after this much pointer inactivity (ms) while playing.
+- name: zen.pip.controls.idle-hide-ms
+  value: 2400
+
+# Last resting corner/edge and size, reused for the next player (JSON).
+- name: zen.pip.last-placement
+  value: ""

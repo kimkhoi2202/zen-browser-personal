@@ -50,6 +50,26 @@ pictureinpicture-minimize-btn =
   .aria-label = Minimize
   .tooltip = Minimize
 
+## Native Picture-in-Picture controls (macOS)
+
+zen-pip-back-15 =
+  .aria-label = Back 15 seconds
+zen-pip-forward-15 =
+  .aria-label = Forward 15 seconds
+zen-pip-captions-show =
+  .aria-label = Show captions
+zen-pip-captions-hide =
+  .aria-label = Hide captions
+zen-pip-captions-unavailable =
+  .aria-label = Captions unavailable
+zen-pip-timeline =
+  .aria-label = Playback position
+# Joins the elapsed and total time, e.g. "1:35 of 24:01".
+zen-pip-time-of = of
+zen-pip-live = Live
+zen-pip-restore =
+  .aria-label = Show Picture-in-Picture
+
 zen-panel-ui-gradient-generator-custom-color = Custom Color
 
 zen-copy-current-url-confirmation = Copied current URL!

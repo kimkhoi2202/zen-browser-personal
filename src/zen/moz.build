@@ -16,6 +16,7 @@ DIRS += [
     "live-folders",
     "media",
     "mods",
+    "pip",
     "tests",
     "urlbar",
     "toolkit",
