@@ -27,10 +27,124 @@ export const ARC_ACTION_ALIASES = {
 };
 
 export function actionSearchTerms(action) {
-  return [
-    action.extraPayload?.prettyName || action.label,
+  const destination = action.extraPayload?.prettyName;
+  return [...new Set([
+    destination || action.label,
+    destination && `${action.label} ${destination}`,
     ...(action.aliases || []),
-  ].filter(Boolean);
+  ].filter(Boolean))];
+}
+
+// Destination rows use the existing action view and native tab operations.
+// Capture the source tab so a delayed result can never move another tab.
+export function destinationActions(window, labelFor) {
+  const spaces = window.gZenWorkspaces;
+  const browser = window.gBrowser;
+  const tab = browser?.selectedTab;
+  if (
+    !spaces || spaces.privateWindowOrDisabled || !tab || tab.closing ||
+    tab.hasAttribute("zen-empty-tab") || tab.hasAttribute("zen-essential")
+  ) {
+    return [];
+  }
+  const workspaces = spaces.getWorkspaces();
+  const current = tab.getAttribute("zen-workspace-id");
+  const split = tab.group?.hasAttribute("split-view-group");
+  const validSource = owner => owner === window && browser.selectedTab === tab &&
+    tab.isConnected !== false && !tab.closing &&
+    !tab.hasAttribute("zen-empty-tab") && !tab.hasAttribute("zen-essential") &&
+    !spaces.privateWindowOrDisabled;
+  const validSpace = id => spaces.getWorkspaces().some(space => space.uuid === id);
+  const followTab = async id => {
+    spaces.lastSelectedWorkspaceTabs[id] = tab;
+    await spaces.changeWorkspaceWithID(id);
+  };
+  const actions = [];
+  for (const space of workspaces) {
+    const extraPayload = {
+      prettyName: space.name,
+      prettyIcon: space.icon,
+      accentColor: spaces.workspaceElement(space.uuid)
+        ?.style.getPropertyValue("--zen-primary-color"),
+    };
+    if (space.uuid !== current) {
+      actions.push({
+        label: labelFor("zen-action-personal-move-to"),
+        commandId: `zen:move-to-space-${space.uuid}`,
+        icon: "chrome://browser/skin/zen-icons/forward.svg",
+        extraPayload,
+        async command(owner) {
+          if (!validSource(owner) || !validSpace(space.uuid)) {
+            return;
+          }
+          spaces.moveTabToWorkspace(tab, space.uuid);
+          await followTab(space.uuid);
+        },
+      });
+    }
+    if (!split && (!tab.pinned || space.uuid !== current || tab.group)) {
+      actions.push({
+        label: labelFor("zen-action-personal-pin-to"),
+        commandId: `zen:pin-to-space-${space.uuid}`,
+        icon: "chrome://browser/skin/zen-icons/pin.svg",
+        extraPayload,
+        async command(owner) {
+          if (!validSource(owner) || !validSpace(space.uuid)) {
+            return;
+          }
+          // Pinning an already pinned tab is a no-op; explicitly leave its
+          // folder so Pin to a Space means that Space's top-level pins.
+          for (let group = tab.group; group; group = group.group) {
+            browser.ungroupTab(tab);
+          }
+          browser.pinTab(tab);
+          spaces.moveTabToWorkspace(tab, space.uuid);
+          await followTab(space.uuid);
+        },
+      });
+    }
+  }
+  if (split) {
+    return actions;
+  }
+  for (const folder of browser.tabGroups) {
+    const id = folder.getAttribute("zen-workspace-id");
+    const space = workspaces.find(item => item.uuid === id);
+    if (!folder.isZenFolder || folder.isLiveFolder || !space ||
+        folder === tab.group || folder.isConnected === false) {
+      continue;
+    }
+    const path = [];
+    for (let parent = folder; parent?.isZenFolder; parent = parent.group) {
+      path.unshift(parent.label);
+    }
+    const folderPath = path.join(" / ");
+    actions.push({
+      label: labelFor("zen-action-personal-pin-to"),
+      commandId: `zen:pin-to-folder-${folder.id}`,
+      icon: "chrome://browser/skin/zen-icons/folder.svg",
+      extraPayload: { prettyName: `${space.name} / ${folderPath}` },
+      aliases: [
+        `${labelFor("zen-action-personal-pin-to")} ${folderPath}`,
+        `${labelFor("zen-action-personal-move-to")} ${space.name} / ${folderPath}`,
+        `${labelFor("zen-action-personal-move-to")} ${folderPath}`,
+      ],
+      async command(owner) {
+        if (!validSource(owner) || !validSpace(id) ||
+            !browser.tabGroups.includes(folder) || !folder.isZenFolder ||
+            folder.isLiveFolder || folder.isConnected === false ||
+            folder.getAttribute("zen-workspace-id") !== id) {
+          return;
+        }
+        browser.pinTab(tab);
+        spaces.moveTabToWorkspace(tab, id);
+        folder.addTabs([tab]);
+        folder.collapsed = false;
+        await followTab(id);
+      },
+    });
+  }
+  return actions;
 }
 
 export function isExactActionQuery(action, query) {

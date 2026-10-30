@@ -95,7 +95,8 @@ test("Arc aliases match the same action without becoming ordinary-query matches"
 
 test("matching respects a workspace/extension pretty name", () => {
   const action = { label: "Focus on", extraPayload: { prettyName: "School" } };
-  assert.deepEqual(actionSearchTerms(action), ["School"]);
+  assert.deepEqual(actionSearchTerms(action), ["School", "Focus on School"]);
+  assert.equal(isExactActionQuery(action, "focus on School"), true);
   assert.equal(isExactActionQuery(action, "focus on"), false);
 });
 

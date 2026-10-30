@@ -12,6 +12,7 @@ import {
 import { zenUrlbarResultsLearner } from "./ZenUBResultsLearner.sys.mjs";
 import {
   actionSearchTerms,
+  destinationActions,
   preferredActionForQuery,
 } from "resource:///modules/zen/urlbar/PersonalCommandActions.mjs";
 
@@ -253,6 +254,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     return globalActions
       .filter(a => a.isAvailable(window))
       .concat(this.#getWorkspaceActions(window))
+      .concat(destinationActions(window, labelFor))
       .concat(await this.#getExtensionActions(window));
   }
 
@@ -443,6 +445,10 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     let shown = 0;
     zenUrlbarResultsLearner
       .sortCommandsByPriority(finalResults)
+      .sort((a, b) =>
+        Number(b.commandId === preferredAction?.commandId) -
+        Number(a.commandId === preferredAction?.commandId)
+      )
       .forEach(result => {
         if (isPrefixed && !isWorkspaceSearch && i === 0 && query.length > 1) {
           result.heuristic = true;
@@ -585,7 +591,7 @@ export class ZenUrlbarProviderGlobalActions extends UrlbarProvider {
     const ownerGlobal = details.element.documentGlobal;
     ownerGlobal.gBrowser.selectedBrowser.focus();
     if (typeof command === "function") {
-      command(ownerGlobal);
+      Promise.resolve(command(ownerGlobal)).catch(console.error);
       return;
     }
     // Switch workspace if theres a workspaceId in the payload.
