@@ -1,8 +1,114 @@
 diff --git a/toolkit/components/pictureinpicture/content/player.js b/toolkit/components/pictureinpicture/content/player.js
-index 34d92dcfba54de4752036d0e251243729b6c9626..20a0399e3bf6f9827f805ea6975b801ae269646d 100644
+index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cbe250e730 100644
 --- a/toolkit/components/pictureinpicture/content/player.js
 +++ b/toolkit/components/pictureinpicture/content/player.js
-@@ -764,6 +764,11 @@ let Player = {
+@@ -14,6 +14,9 @@ const { DeferredTask } = ChromeUtils.importESModule(
+ const { AppConstants } = ChromeUtils.importESModule(
+   "resource://gre/modules/AppConstants.sys.mjs"
+ );
++const { ZenPipNativeControls } = ChromeUtils.importESModule(
++  "resource:///modules/zen/pip/ZenPipNativeControls.sys.mjs"
++);
+ 
+ const AUDIO_TOGGLE_ENABLED_PREF =
+   "media.videocontrols.picture-in-picture.audio-toggle.enabled";
+@@ -160,12 +163,56 @@ function closeFromForeground() {
+   Player.closeFromForeground();
+ }
+ 
++/**
++ * Zen: numeric playback position for the native timeline.
++ *
++ * @param {object} data { currentTime, duration, isLive }
++ */
++function zenSetTimeline(data) {
++  Player.zenNative?.setTimeline(data);
++}
++
++/**
++ * Zen: lets the native chrome adopt a new video size while keeping its
++ * anchor and display. Returns false when the stock resize path should be used
++ * (no native chrome). With the native chrome every resize is handled here;
++ * transient 0x0 sizes (e.g. while a site swaps sources) are ignored instead of
++ * collapsing the window.
++ */
++function zenResizeToVideo(videoData) {
++  if (!Player.zenNative) {
++    return false;
++  }
++  Player.zenNative.setVideoSize(videoData.videoWidth, videoData.videoHeight);
++  return true;
++}
++
++/**
++ * Zen: the browser window of the source tab; the native player stays on
++ * (and follows) that window's display.
++ */
++function zenSetSourceWindow(sourceWindow) {
++  Player.zenNative?.setSourceWindow(sourceWindow);
++}
++
++/**
++ * Zen: the native chrome session, for diagnostics and tests.
++ */
++function zenNativeSession() {
++  return Player.zenNative;
++}
++
+ /**
+  * The Player object handles initializing the player, holds state, and handles
+  * events for updating state.
+  */
+ let Player = {
+   _isInitialized: false,
++  /**
++   * Zen: native macOS chrome session (Liquid Glass controls, window motion),
++   * or null when the stock HTML controls are used.
++   */
++  zenNative: null,
+   WINDOW_EVENTS: [
+     "click",
+     "contextmenu",
+@@ -431,10 +478,20 @@ let Player = {
+ 
+     this._isInitialized = true;
+ 
++    this.zenNative = ZenPipNativeControls.attach(window, this);
++    if (this.zenNative) {
++      document.documentElement.setAttribute("zen-native-controls", "true");
++      this.zenNative.setPlaying(this.isPlaying);
++      this.zenNative.setMuted(this.isMuted);
++      this.zenNative.setPlaybackRate(this._playbackRate);
++    }
++
+     return { actor: this.actor, setupPromise };
+   },
+ 
+   uninit() {
++    this.zenNative?.destroy();
++    this.zenNative = null;
+     this.resizeDebouncer.disarm();
+     PictureInPicture.unload(window, this.actor);
+   },
+@@ -481,6 +538,9 @@ let Player = {
+       }
+ 
+       case "keydown": {
++        if (this.zenNative?.handleKeyDown(event)) {
++          break;
++        }
+         if (event.keyCode == KeyEvent.DOM_VK_TAB) {
+           this.controls.setAttribute(KEYING_ATTRIBUTE, true);
+           this.showVideoControls();
+@@ -781,6 +841,7 @@ let Player = {
+       return;
+     }
+     this._playbackRate = playbackRate;
++    this.zenNative?.setPlaybackRate(playbackRate);
+     let rounded = Math.round(playbackRate * 100) / 100;
+     this.playbackRateSlider.value = rounded;
+     document.l10n.setAttributes(
+@@ -1001,6 +1062,11 @@ let Player = {
          document.getElementById("large").click();
          break;
        }
@@ -14,3 +120,76 @@ index 34d92dcfba54de4752036d0e251243729b6c9626..20a0399e3bf6f9827f805ea6975b801a
      }
      // If the click came from a element that is not inside the subtitles settings panel
      // then we want to hide the panel
+@@ -1070,6 +1136,9 @@ let Player = {
+   },
+ 
+   fullscreenModeToggle() {
++    if (this.zenNative) {
++      return;
++    }
+     if (this.isFullscreen) {
+       document.exitFullscreen();
+     } else {
+@@ -1194,6 +1263,7 @@ let Player = {
+     this.actor.sendAsyncMessage("PictureInPicture:ToggleTextTracks");
+ 
+     this.captionsToggleEnabled = !this.captionsToggleEnabled;
++    this.zenNative?.setCaptions(true, this.captionsToggleEnabled);
+     Services.prefs.setBoolPref(
+       CAPTIONS_TOGGLE_ENABLED_PREF,
+       this.captionsToggleEnabled
+@@ -1424,6 +1494,10 @@ let Player = {
+ 
+   enableSubtitlesButton() {
+     this.closedCaptionButton.disabled = false;
++    this.zenNative?.setCaptions(
++      true,
++      Services.prefs.getBoolPref(CAPTIONS_TOGGLE_ENABLED_PREF, true)
++    );
+ 
+     this.alignEndControlsButtonTooltips();
+     this.captionsToggleEnabled = true;
+@@ -1437,6 +1511,7 @@ let Player = {
+ 
+   disableSubtitlesButton() {
+     this.closedCaptionButton.disabled = true;
++    this.zenNative?.setCaptions(false, false);
+ 
+     this.alignEndControlsButtonTooltips();
+   },
+@@ -1596,6 +1671,7 @@ let Player = {
+ 
+   set isPlaying(isPlaying) {
+     this._isPlaying = isPlaying;
++    this.zenNative?.setPlaying(isPlaying);
+     this.controls.classList.toggle("playing", isPlaying);
+     let strId = isPlaying
+       ? `pictureinpicture-pause-btn`
+@@ -1635,6 +1711,7 @@ let Player = {
+ 
+   set isMuted(isMuted) {
+     this._isMuted = isMuted;
++    this.zenNative?.setMuted(isMuted);
+     if (!isMuted) {
+       this.audioScrubber.max = 1;
+     } else if (!this.audioScrubbing) {
+@@ -1675,6 +1752,9 @@ let Player = {
+    * so that subtitles are visible when showing video controls.
+    */
+   showVideoControls() {
++    if (this.zenNative) {
++      return;
++    }
+     // offsetParent returns null when the element or any ancestor has display: none
+     // See https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/offsetParent
+     this.actor.sendAsyncMessage("PictureInPicture:ShowVideoControls", {
+@@ -1690,6 +1770,9 @@ let Player = {
+    * so that subtitles take up remaining space when hiding video controls.
+    */
+   hideVideoControls() {
++    if (this.zenNative) {
++      return;
++    }
+     this.actor.sendAsyncMessage("PictureInPicture:HideVideoControls", {
+       isFullscreen: this.isFullscreen,
+       isVideoControlsShowing: false,

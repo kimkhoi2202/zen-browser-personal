@@ -1,8 +1,8 @@
 diff --git a/toolkit/themes/shared/pictureinpicture/player.css b/toolkit/themes/shared/pictureinpicture/player.css
-index 2e502fb075546bab4349f3da97069e764528d763..4ff7f2ee47085c2d2131f54a647468fab81c7d88 100644
+index 72b016f9626370a3c51a0850d47fb28d9bb4c80c..b05b20931762637168c087b3068fff81b2a2cd7b 100644
 --- a/toolkit/themes/shared/pictureinpicture/player.css
 +++ b/toolkit/themes/shared/pictureinpicture/player.css
-@@ -738,3 +738,17 @@ input:checked + .slider::before {
+@@ -845,3 +845,23 @@ input:checked + .slider::before {
      justify-self: center;
    }
  }
@@ -19,4 +19,10 @@ index 2e502fb075546bab4349f3da97069e764528d763..4ff7f2ee47085c2d2131f54a647468fa
 +#minimize[mac="true"] {
 +  right: auto;
 +  left: 50px;
++}
++
++/* Zen: the native macOS chrome (Liquid Glass controls) replaces the HTML
++ * controls; they stay in the DOM because the player logic still uses them. */
++:root[zen-native-controls] #controls {
++  display: none !important;
 +}

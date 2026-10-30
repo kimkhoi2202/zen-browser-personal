@@ -1,8 +1,19 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 49dd388d8304245e9e840cc32577eed45d36d62c..dde63be2eb6c442acb387b14bf05c18ce9419fa4 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..86a0f8802aa07e8c678b5182af1de8386da2b429 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
-@@ -318,6 +318,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -285,6 +285,10 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+       volume: PictureInPictureChild.videoWrapper.getVolume(video),
+       playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
+       autoFocus,
++      // Zen: numeric position for the native timeline.
++      currentTime: PictureInPictureChild.videoWrapper.getCurrentTime(video),
++      duration: PictureInPictureChild.videoWrapper.getDuration(video),
++      isLive: PictureInPictureChild.videoWrapper.isLive(video),
+     });
+ 
+     // Some tests don't bother setting a reason.
+@@ -346,6 +350,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        if (
          video &&
          PictureInPictureChild.videoIsPlaying(video) &&
@@ -10,3 +21,32 @@ index 49dd388d8304245e9e840cc32577eed45d36d62c..dde63be2eb6c442acb387b14bf05c18c
          PictureInPictureChild.videoIsPiPEligible(video)
        ) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
+@@ -2181,6 +2186,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+             {
+               scrubberPosition,
+               timestamp,
++              // Zen: numeric values for the native timeline.
++              currentTime,
++              duration,
++              isLive: this.videoWrapper.isLive(video),
+             }
+           );
+         }
+@@ -2291,12 +2300,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         let selectedTime;
+         let video = this.getWeakVideo();
+         let currentTime = this.videoWrapper.getCurrentTime(video);
++        // Zen: callers may pass the seek amount (seconds).
++        let seekSeconds =
++          message.data?.seconds > 0 ? message.data.seconds : SEEK_TIME_SECS;
+         if (message.name == "PictureInPicture:SeekBackward") {
+-          selectedTime = currentTime - SEEK_TIME_SECS;
++          selectedTime = currentTime - seekSeconds;
+           selectedTime = selectedTime >= 0 ? selectedTime : 0;
+         } else {
+           const maxtime = this.videoWrapper.getDuration(video);
+-          selectedTime = currentTime + SEEK_TIME_SECS;
++          selectedTime = currentTime + seekSeconds;
+           selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
+         }
+         this.videoWrapper.setCurrentTime(video, selectedTime);
