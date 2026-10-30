@@ -38,9 +38,19 @@ placement, native-player and motion branches. No PiP preference is changed.
 Automated verification: 87 Node tests and 11 Python tests pass, including actual
 provider loading with synthetic native services, query isolation, execution,
 nested destinations and stale-result guards. Syntax and whitespace checks pass.
-Native verification and daily installation are still pending; current app
-controls time out when opening the daily Zen accessibility tree. Do not claim
-the candidate is installed or promote it before a successful native test.
+The signed Dev candidate passed native Actions entry/exit, Up/Down selection,
+Tab retaining selection, Space moves, Space pinning, cross-Space folder pinning,
+moving a folder pin to top-level pins, and y + Tab site search. Synthetic tabs
+and a folder were created only in Dev. Its closed pre-test profile was backed
+up and restored afterwards. Nested-folder execution and split groups have only
+automated coverage. A Tab sent in the same tool call immediately after Command-T
+was missed once; opening the bar before pressing Tab worked. No extra key handler
+or timing workaround was added.
+
+Production packaging is signed; Apple notarization and installation status are
+recorded separately under the parent workspace's Private/Actions Command Bar.
+The daily app has not yet been replaced. App controls timed out on its large
+accessibility tree; do not confuse that with failed Dev verification.
 
 Official reference: https://start.arc.net/command-bar-actions
 

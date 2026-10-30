@@ -5,6 +5,7 @@ personal/channels.json. The user authorized Zen (Dev) for testing and Zen (Prod)
 daily use, alongside the untouched official Zen app, keyword-plus-Tab search and provider-colored badges.
 
 Source mapping:
+- personal/Actions Mode.md: Arc inspection, native Actions destinations and current verification limits for personal.13. scripts/personal/destinations.test.mjs exercises dynamic Space/folder rows and the actual provider with synthetic services. build_macos.py generates dist/actions-dev and dist/actions-production from runtime 49b67431; no PiP branch is included. Private install/notarization evidence stays outside Git in the parent workspace's Private/Actions Command Bar.
 - scripts/personal/ui_patch.py patch_findbar_position: gives only the native Find bar its own auto-sized top row in content-area.css. build_macos.py applies it to browser omni.ja; apply_to_engine.py applies it after a full engine import. See personal/Find Bar.md for native HTML/PDF testing, screenshot mapping and the installed local personal.11 update.
 - src/zen/common/styles/zen-addons-grid.css: responsive extension-list columns; appended to the toolkit stylesheet by ui_patch.py in both build paths.
 - scripts/personal/addons_fixture.py: creates an ignored local HTML preview from the candidate's actual stylesheet, with sample cards at four widths; it never reads or installs extensions. Run with --app 'path/to/Zen (Dev).app' --output dist/addons-layout-preview.html, then open that file in Dev. PASS labels report native layout geometry and overflow.
