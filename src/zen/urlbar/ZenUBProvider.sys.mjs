@@ -6,6 +6,7 @@ import { ProvidersManager } from "moz-src:///browser/components/urlbar/UrlbarPro
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  PersonalSiteSearchHistory: "resource:///modules/PersonalSiteSearchHistory.sys.mjs",
   /* eslint-disable mozilla/valid-lazy */
   ZenUrlbarProviderGlobalActions:
     "resource:///modules/ZenUBActionsProvider.sys.mjs",

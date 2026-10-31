@@ -67,3 +67,6 @@ zen-action-personal-developer-tools = Developer Tools
 zen-action-personal-inspector = Inspect Elements
 zen-action-personal-console = JavaScript Console
 zen-action-personal-network = Network Inspector
+# Placeholder shared by Actions and site-search mode.
+personal-command-palette-search =
+    .placeholder = Search…

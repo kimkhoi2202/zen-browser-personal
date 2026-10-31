@@ -79,9 +79,16 @@ def patch_input(source):
       } else if (source) {'''
     if source.count(anchor)!=1:
         raise RuntimeError('Upstream search accessibility label changed; review the patch')
-    return source.replace(anchor, '''          { name: getProviderLabel(
+    source = source.replace(anchor, '''          { name: getProviderLabel(
               engineName,
               this.controller.engineStore.getEngineByName(engineName)?.aliases
             ) }
         );
       } else if (source) {''')
+    anchor = '    this.toggleAttribute("searchmode", true);'
+    if source.count(anchor) != 1:
+        raise RuntimeError('Upstream search mode state changed; review the patch')
+    return source.replace(anchor, '''    this.document.l10n.setAttributes(
+      this.inputField, "personal-command-palette-search"
+    );
+''' + anchor)

@@ -25,6 +25,9 @@ INPUT_BASE='chrome/browser/content/browser/urlbar/UrlbarInputBase.mjs'
 ZEN_CONTROLLER='modules/zen/urlbar/ZenUrlbarController.mjs'
 HELPER='modules/zen/urlbar/PersonalSiteSearch.mjs'
 ADDITIONAL_UI={
+    'modules/PersonalSiteSearchHistory.sys.mjs':'src/zen/urlbar/PersonalSiteSearchHistory.sys.mjs',
+    'modules/ZenUBProvider.sys.mjs':'src/zen/urlbar/ZenUBProvider.sys.mjs',
+    'chrome/browser/content/browser/zen-styles/zen-personal-command-palette.css':'src/zen/common/styles/zen-personal-command-palette.css',
     'modules/zen/urlbar/PersonalCommandActions.mjs':'src/zen/urlbar/PersonalCommandActions.mjs',
     'modules/ZenUBGlobalActions.sys.mjs':'src/zen/urlbar/ZenUBGlobalActions.sys.mjs',
     'modules/ZenUBActionsProvider.sys.mjs':'src/zen/urlbar/ZenUBActionsProvider.sys.mjs',

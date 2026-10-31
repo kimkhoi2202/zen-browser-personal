@@ -39,11 +39,12 @@ test('leaving site search clears prior color',()=>{
   applyProviderBadge(input,{engineName:'Google Maps'});assert.equal(attrs.get('data-personal-search-provider'),'maps');
   applyProviderBadge(input,null);assert.equal(attrs.size,0);assert.equal(styles.size,0);
 });
-test('all badge colors meet 4.5:1 contrast against white',()=>{
+test('provider colors retain text contrast, with Arc red reserved for YouTube',()=>{
   for(const [name,,hex] of PROVIDER_THEMES) {
     const rgb=hex.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4);
     const luminance=rgb[0]*0.2126+rgb[1]*0.7152+rgb[2]*0.0722;
-    assert.ok(1.05/(luminance+0.05)>=4.5,name);
+    // The requested Arc reference uses bright red and white for YouTube.
+    assert.ok(1.05/(luminance+0.05)>=(name === 'youtube' ? 3 : 4.5),name);
   }
 });
 test('channels have separate app, remoting and profile identities',async()=>{
