@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Build two signed UI artifact variants; never modifies the input app/profile.
 
-The engine remains the verified official release. Only source-controlled UI
-modules, app identity/launcher, and per-channel update policy are customized.
+The engine is the verified official release, or with --source-built the engine
+this fork compiled itself (scripts/personal/build_engine.sh), which personal
+changes with native code need. Only source-controlled UI modules, app
+identity/launcher, and per-channel update policy are customized here.
 """
 import argparse
 import configparser
@@ -34,6 +36,33 @@ ADDITIONAL_UI={
 def run(*cmd,**kwargs):return subprocess.run([str(x) for x in cmd],check=True,**kwargs)
 
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+
+# A source-built engine may be packaged from a later commit only if nothing it
+# compiled has changed since: these paths are packaging inputs this builder
+# installs itself, or documentation and tooling the engine never sees.
+PACKAGING_ONLY=('personal/','scripts/personal/','.github/','docs/','Generation Scripts/',
+                'src/zen/urlbar/ZenUrlbarController.mjs','src/zen/urlbar/PersonalSiteSearch.mjs',
+                ADDONS_CSS_SOURCE,*ADDITIONAL_UI.values())
+
+def engine_affecting(paths):
+    """Changed paths that only a new engine build would pick up."""
+    def packaging(p):
+        return ('/' not in p and p.endswith('.md')) or any(
+            p==x or (x.endswith('/') and p.startswith(x)) for x in PACKAGING_ONLY)
+    return [p for p in paths if not packaging(p)]
+
+def verify_source_built(metadata):
+    stamp=metadata['App'].get('SourceStamp','')
+    if metadata['App'].get('Version')!=CONFIG['upstream']['tag']:
+        raise RuntimeError('Source-built engine is not the pinned upstream version')
+    for ancestor,descendant,problem in ((CONFIG['upstream']['commit'],stamp,'does not contain the pinned upstream release'),
+                                        (stamp,'HEAD','was not built from an ancestor of this checkout')):
+        if subprocess.run(['git','merge-base','--is-ancestor',ancestor,descendant],cwd=ROOT,capture_output=True).returncode:
+            raise RuntimeError('Source-built engine '+problem)
+    changed=engine_affecting(subprocess.check_output(['git','diff','--name-only',stamp,'HEAD'],cwd=ROOT,text=True).split())
+    if changed:
+        raise RuntimeError('Compiled sources changed since the engine was built; rebuild it: '+', '.join(changed[:8]))
+    return stamp
 
 def verify_engine_identity(app):
     # Native messaging authenticates the running engine, not the launcher.
@@ -78,16 +107,22 @@ def package_archive(directory,path):
     with zipfile.ZipFile(path) as z:
         if z.testzip():raise RuntimeError('Invalid generated archive')
 
-def build(base,channel,identity,output):
+def build(base,channel,identity,output,source_built=False):
     settings=CONFIG['channels'][channel]
     base_info=plistlib.loads((base/'Contents/Info.plist').read_bytes())
     if base_info.get('CFBundleIdentifier')!='app.zen-browser.zen' or not (base/'Contents/MacOS/zen').is_file():
-        raise RuntimeError('Use an unmodified official Zen app as the build base')
+        raise RuntimeError('Use the packaged build_engine.sh engine as the base' if source_built
+                           else 'Use an unmodified official Zen app as the build base')
     metadata=configparser.ConfigParser(interpolation=None)
     metadata.optionxform=str
     metadata.read(base/'Contents/Resources/application.ini')
-    if metadata['App']['SourceStamp']!=CONFIG['upstream']['commit']:
+    engine_build_id=metadata['App'].get('BuildID')
+    if source_built:
+        engine_commit=verify_source_built(metadata)
+    elif metadata['App']['SourceStamp']!=CONFIG['upstream']['commit']:
         raise RuntimeError('Base app is not the pinned upstream release; update and test the source first')
+    else:
+        engine_commit=CONFIG['upstream']['commit']
     app=output/(settings['appName']+'.app')
     if app.exists():raise RuntimeError(f'Output already exists; preserve or relocate it first: {app}')
     output.mkdir(parents=True,exist_ok=True)
@@ -97,7 +132,8 @@ def build(base,channel,identity,output):
     # preserve quarantine and all other attributes, then verify vendor code.
     for attr in ('com.apple.FinderInfo','com.apple.ResourceFork'):
         subprocess.run(['xattr','-dr',attr,str(app)],capture_output=True)
-    run('codesign','--verify','--deep','--strict',app,capture_output=True)
+    # A local engine build carries no vendor signature; it is signed below.
+    if not source_built:run('codesign','--verify','--deep','--strict',app,capture_output=True)
     archive=app/'Contents/Resources/browser/omni.ja'
     original_archive_sha=sha(archive)
     with tempfile.TemporaryDirectory(prefix='zen-personal-ui-') as temp:
@@ -114,8 +150,11 @@ def build(base,channel,identity,output):
         content_area.write_text(patch_findbar_position(content_area.read_text()))
         defaults=extracted/'defaults/preferences/firefox.js'
         prefs=defaults.read_text();anchor='pref("zen.view.use-single-toolbar", true);'
-        if prefs.count(anchor)!=1:raise RuntimeError('Review upstream toolbar default before packaging')
-        defaults.write_text(prefs.replace(anchor,'pref("zen.view.use-single-toolbar", false);'))
+        personal='pref("zen.view.use-single-toolbar", false);'
+        # A source-built engine already compiled prefs/zen/view.yaml's default.
+        if not (source_built and anchor not in prefs and prefs.count(personal)==1):
+            if prefs.count(anchor)!=1:raise RuntimeError('Review upstream toolbar default before packaging')
+            defaults.write_text(prefs.replace(anchor,personal))
         package_archive(extracted,archive)
     platform_archive=app/'Contents/Resources/omni.ja'
     original_platform_archive_sha=sha(platform_archive)
@@ -172,10 +211,12 @@ def build(base,channel,identity,output):
         '--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
     run('codesign','--verify','--deep','--strict',app,capture_output=True)
     verify_engine_identity(app)
-    report={'status':'packaged-and-signature-verified','channel':channel,'app':str(app),
+    report={'status':'packaged-and-signature-verified','channel':channel,'revision':CONFIG['revision'],'app':str(app),
             'bundle_id':settings['bundleId'],'profile_directory':'~/Library/Application Support/Zen Personal/'+settings['profileDirectory'],
             'upstream':CONFIG['upstream'],'source':source_metadata(),
-            'engine':'official released engine; frontend modules customized',
+            'engine':('source-built by scripts/personal/build_engine.sh (Zen release configuration, PGO, ThinLTO); '
+                      'frontend modules customized') if source_built else 'official released engine; frontend modules customized',
+            'engine_source_commit':engine_commit,'engine_build_id':engine_build_id,
             'architectures':architectures,'minimum_macos':base_info.get('LSMinimumSystemVersion','11.0'),
             'base_archive_sha256':original_archive_sha,'modified_archive_sha256':sha(archive),
             'base_platform_archive_sha256':original_platform_archive_sha,'modified_platform_archive_sha256':sha(platform_archive),
@@ -191,5 +232,7 @@ if __name__=='__main__':
     parser.add_argument('--channel',choices=CONFIG['channels'],required=True)
     parser.add_argument('--identity',required=True)
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--source-built',action='store_true',
+                        help='the base is the packaged engine from scripts/personal/build_engine.sh')
     args=parser.parse_args()
-    build(args.base,args.channel,args.identity,args.output or ROOT/'dist'/args.channel)
+    build(args.base,args.channel,args.identity,args.output or ROOT/'dist'/args.channel,args.source_built)

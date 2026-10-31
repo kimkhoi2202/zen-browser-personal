@@ -135,16 +135,14 @@ is not a claim of Apple notarization.
 
 ## Full-source build path
 
-The fork includes Zen's original build machinery. `npm run init` imports the
-tracked Zen source and patches, including PersonalSiteSearch.mjs and the
-ZenUrlbarController theme hook. Then run `python3 scripts/personal/apply_to_engine.py`
-and `npm run build`. This separate exact-anchor overlay patches Tab dispatch.
-Brand/profile/bundle/update identities must be configured for a full native
-compile too; the artifact builder's identity changes are not magically applied
-to a full-source build. See Zen's official contribution/build documentation.
-
-The first task is to establish the lightweight tested artifact workflow, not
-to claim a successfully compiled native engine that has not been compiled.
+Changes with native code need the engine compiled from this fork's source; the
+Yab-style PiP is the first. [Native Engine Builds](Native%20Engine%20Builds.md)
+covers the build tree, `scripts/personal/build_engine.sh` (Zen's release
+configuration with local PGO) and packaging with `build_macos.py --source-built`,
+which applies the same overlays, identities and signing as the artifact path.
+`apply_to_engine.py` remains for development engines that should contain the
+overlays directly; do not run it before a `--source-built` package, whose
+overlays are applied (and anchor-checked) by the builder.
 
 ## Closed-profile copy tool
 
