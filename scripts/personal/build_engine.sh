@@ -136,7 +136,7 @@ stage_locales() {
   fi
   "$PYTHON" scripts/copy_language_pack.py en-US > "$LOG_DIR/language-packs.log" 2>&1
   for lang in $(tr -d '\r' < locales/supported-languages); do
-    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2)
+    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2 || true)
     rsync -a --exclude .git "$l10n/${code:-$lang}/" "locales/$lang/"
     "$PYTHON" scripts/copy_language_pack.py "$lang" >> "$LOG_DIR/language-packs.log" 2>&1
     find "locales/$lang" -type f -not -name 'zen*' -delete
@@ -151,7 +151,7 @@ stage_locales() {
 packaged_locales() {
   local lang code
   for lang in $(tr -d '\r' < locales/supported-languages); do
-    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2)
+    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2 || true)
     echo "${code:-$lang}"
   done
 }
