@@ -54,7 +54,7 @@
     fill: currentColor !important;
   }
   & #urlbar-search-mode-indicator {
-    background: var(--personal-palette-accent) !important;
+    background: var(--personal-search-background, #23374f) !important;
     color: white !important;
     padding: 4px 10px !important;
     border: none !important;
