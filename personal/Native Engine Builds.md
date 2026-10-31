@@ -28,7 +28,8 @@ toolchains are bootstrapped into `MOZBUILD_STATE_PATH`.
 
     scripts/personal/build_engine.sh all
 
-or its stages `prepare`, `instrumented`, `profile`, `optimized`, `package`.
+or its stages `prepare`, `instrumented`, `profile`, `optimized`, `locales`,
+`package`.
 It uses Zen's own release configuration (`configs/common` and `configs/macos`
 with `ZEN_RELEASE`: optimize, release, Rust SIMD, `MOZILLA_OFFICIAL`,
 cross-language ThinLTO, `-mcpu=apple-m1`, the 26.5 SDK) and Zen's two-stage
@@ -36,7 +37,12 @@ PGO: an instrumented build, Zen's profile-server training (it opens an
 instrumented Zen window for several minutes and downloads Mozilla's pinned
 JetStream corpus), then the optimized build. The updater is not built. The
 engine records the checkout's HEAD as its SourceStamp, and the fork URL as its
-source repository. The build is arm64 only and runs natively on Apple Silicon.
+source repository. Packaging includes Zen's 40 UI languages the way Zen's CI
+does (`mach package-multi-locale`, the pinned `mozilla-l10n/firefox-l10n`
+commit plus Zen's own strings); the `locales` stage replaces Zen's
+`download-language-packs.sh`, which changes global git settings and deletes
+folders in the home directory, so don't run that script on a personal Mac.
+The build is arm64 only and runs natively on Apple Silicon.
 
 ## Package
 

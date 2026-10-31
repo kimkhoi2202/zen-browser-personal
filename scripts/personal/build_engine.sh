@@ -14,7 +14,8 @@
 #   scripts/personal/build_engine.sh instrumented   PGO stage 1 build + package
 #   scripts/personal/build_engine.sh profile        PGO training run (opens a window)
 #   scripts/personal/build_engine.sh optimized      PGO stage 2 build with LTO
-#   scripts/personal/build_engine.sh package        package the optimized engine
+#   scripts/personal/build_engine.sh locales        Zen's 40 UI languages
+#   scripts/personal/build_engine.sh package        package all languages
 #   scripts/personal/build_engine.sh all
 #
 # Run from a committed checkout whose engine/ holds the pinned Firefox source
@@ -120,9 +121,46 @@ stage_optimized() {
   mach build > "$LOG_DIR/build-optimized.log" 2>&1
 }
 
+# What Zen's CI does in scripts/download-language-packs.sh, without that
+# script's global git configuration and home-folder deletions: the pinned
+# mozilla-l10n strings for each supported language, plus Zen's own, go into
+# engine/browser/locales through copy_language_pack.py. Only Zen's tracked
+# zen* files remain under locales/ afterwards.
+stage_locales() {
+  local l10n="$ROOT/../l10n/firefox-l10n" commit lang code
+  commit=$(cat "$ROOT/build/firefox-cache/l10n-last-commit-hash")
+  if [ "$(git -C "$l10n" rev-parse HEAD 2>/dev/null)" != "$commit" ]; then
+    rm -rf "$l10n" && mkdir -p "$l10n" && git -C "$l10n" init -q
+    git -C "$l10n" fetch -q --depth 1 https://github.com/mozilla-l10n/firefox-l10n "$commit"
+    git -C "$l10n" checkout -q FETCH_HEAD
+  fi
+  "$PYTHON" scripts/copy_language_pack.py en-US > "$LOG_DIR/language-packs.log" 2>&1
+  for lang in $(tr -d '\r' < locales/supported-languages); do
+    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2)
+    rsync -a --exclude .git "$l10n/${code:-$lang}/" "locales/$lang/"
+    "$PYTHON" scripts/copy_language_pack.py "$lang" >> "$LOG_DIR/language-packs.log" 2>&1
+    find "locales/$lang" -type f -not -name 'zen*' -delete
+  done
+  if [ -n "$(git status --porcelain -- locales)" ]; then
+    echo "locales/ differs from the checkout after copying language packs" >&2
+    exit 1
+  fi
+}
+
+# surfer's own packaging order: the en-US package, then every language.
+packaged_locales() {
+  local lang code
+  for lang in $(tr -d '\r' < locales/supported-languages); do
+    code=$(grep "^$lang:" locales/language-maps | cut -d: -f2)
+    echo "${code:-$lang}"
+  done
+}
+
 stage_package() {
   write_mozconfig optimized
   mach package > "$LOG_DIR/package-optimized.log" 2>&1
+  # shellcheck disable=SC2046
+  mach package-multi-locale --locales $(packaged_locales) >> "$LOG_DIR/package-optimized.log" 2>&1
   local app="$ENGINE/$OPTIMIZED_OBJDIR/dist/zen/Zen.app"
   local stamp
   stamp=$(sed -n 's/^SourceStamp=//p' "$app/Contents/Resources/application.ini")
@@ -131,7 +169,7 @@ stage_package() {
 }
 
 case "${1:-}" in
-  prepare|instrumented|profile|optimized|package) "stage_$1" ;;
-  all) stage_prepare; stage_instrumented; stage_profile; stage_optimized; stage_package ;;
-  *) sed -n '2,24p' "$0" >&2; exit 2 ;;
+  prepare|instrumented|profile|optimized|locales|package) "stage_$1" ;;
+  all) stage_prepare; stage_instrumented; stage_profile; stage_optimized; stage_locales; stage_package ;;
+  *) sed -n '2,26p' "$0" >&2; exit 2 ;;
 esac
