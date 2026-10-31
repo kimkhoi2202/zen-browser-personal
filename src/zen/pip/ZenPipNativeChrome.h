@@ -26,6 +26,7 @@ namespace zen::pip {
 //
 // Actions (value / detail):
 //   "toggle-play", "close", "return", "toggle-mute", "toggle-captions"
+//   "go-live"          the Live button of a live stream that can be scrubbed
 //   "seek-relative"    value: seconds (negative = back)
 //   "scrub-start" / "scrub" / "scrub-end"   value: position in [0, 1]
 //   "set-rate"         value: playback rate
@@ -62,10 +63,16 @@ class ChromeHost {
 - (void)setPlaying:(BOOL)aPlaying;
 - (void)setMuted:(BOOL)aMuted;
 - (void)setPlaybackRate:(double)aRate;
+// A live stream (`aLive`) that can be scrubbed passes `aSeekable` with its
+// seekable window: `aCurrentTime` and `aDuration` are then relative to the
+// window start. One that can't be scrubbed shows only a Live status badge.
 - (void)setCurrentTime:(double)aCurrentTime
               duration:(double)aDuration
               seekable:(BOOL)aSeekable
                   live:(BOOL)aLive;
+// For a live stream that can be scrubbed: whether playback is at the live
+// edge (the Live dot is red; grey when behind, as in YouTube's player).
+- (void)setAtLiveEdge:(BOOL)aAtLiveEdge;
 - (void)setCaptionsAvailable:(BOOL)aAvailable enabled:(BOOL)aEnabled;
 - (void)setCaptionSize:(NSString*)aSize;
 // Localized labels (see ZenPipNativeControls.sys.mjs for the keys).

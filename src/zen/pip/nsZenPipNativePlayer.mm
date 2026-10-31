@@ -156,6 +156,12 @@ nsZenPipNativeControls::SetTimeline(double aCurrentTime, double aDuration,
 }
 
 NS_IMETHODIMP
+nsZenPipNativeControls::SetLiveEdge(bool aAtLiveEdge) {
+  [mChrome setAtLiveEdge:aAtLiveEdge];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsZenPipNativeControls::SetCaptions(bool aAvailable, bool aEnabled) {
   [mChrome setCaptionsAvailable:aAvailable enabled:aEnabled];
   return NS_OK;

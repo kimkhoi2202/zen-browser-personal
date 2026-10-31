@@ -1,0 +1,38 @@
+diff --git a/browser/extensions/pictureinpicture/video-wrappers/youtube.js b/browser/extensions/pictureinpicture/video-wrappers/youtube.js
+index 7f7720e0bdd71cb2883e5e41c17c1e938b902dfd..04eb64dca7e524325bf08f8de3cf719cf4ee9079 100644
+--- a/browser/extensions/pictureinpicture/video-wrappers/youtube.js
++++ b/browser/extensions/pictureinpicture/video-wrappers/youtube.js
+@@ -38,6 +38,33 @@ class PictureInPictureVideoWrapper {
+     return video.duration;
+   }
+ 
++  // Zen: YouTube reports a placeholder seekable range for live streams; the
++  // player's progress state has the real one, in player time (media time plus
++  // offset). Streams without DVR report allowSeeking false.
++  getLiveWindow(video) {
++    let progress = this.player?.getProgressState?.();
++    if (!this.isLive(video) || !progress?.allowSeeking) {
++      return null;
++    }
++    let offset = Number(progress.offset) || 0;
++    return {
++      start: Number(progress.seekableStart) - offset,
++      end: Number(progress.seekableEnd) - offset,
++      atLiveEdge: !!progress.isAtLiveHead,
++    };
++  }
++
++  goToLiveEdge(video) {
++    if (typeof this.player?.seekToLiveHead == "function") {
++      this.player.seekToLiveHead();
++    } else {
++      let liveWindow = this.getLiveWindow(video);
++      if (liveWindow) {
++        video.currentTime = Math.max(liveWindow.start, liveWindow.end - 3);
++      }
++    }
++  }
++
+   setCaptionContainerObserver(video, updateCaptionsFunction) {
+     let container = document.getElementById("ytp-caption-window-container");
+ 
