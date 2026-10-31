@@ -66,6 +66,7 @@ function providerFixture({
   isPrivate = false,
   enabled = true,
   delayed = false,
+  formFill = true,
 } = {}) {
   let finish;
   const lazy = {
@@ -75,7 +76,29 @@ function providerFixture({
       RESULT_SOURCE: { HISTORY: 3 },
     },
     UrlbarSearchUtils: {
-      getEngineByName: () => ({ name: "YouTube", getSubmission: () => null }),
+      getEngineByName: () => ({
+        name: "YouTube",
+        getSubmission: () =>
+          formFill
+            ? null
+            : {
+                uri: {
+                  spec: "https://www.youtube.com/results?search_query=zen_search_terms_marker",
+                },
+              },
+      }),
+    },
+    PlacesUtils: {
+      promiseDBConnection: async () => ({
+        executeCached: async () => [
+          {
+            getResultByName: (name) =>
+              name === "url"
+                ? "https://www.youtube.com/results?search_query=from+visits"
+                : 10,
+          },
+        ],
+      }),
     },
     FormHistory: {
       search: () =>
@@ -105,7 +128,12 @@ function providerFixture({
   )(
     class {},
     { lazy, defineESModuleGetters() {} },
-    { prefs: { getBoolPref: () => enabled } },
+    {
+      prefs: {
+        getBoolPref: (name) =>
+          name === "browser.formfill.enable" ? formFill : enabled,
+      },
+    },
     getSearchTemplate,
     searchTermFromURL,
     recentSearchTerms,
@@ -130,7 +158,10 @@ test("history provider uses the native async activation contract and excludes pr
     assert.equal(await activation, false);
   }
   const t = providerFixture();
-  assert.equal(await t.provider.isActive({ ...t.context, searchMode: null }), false);
+  assert.equal(
+    await t.provider.isActive({ ...t.context, searchMode: null }),
+    false,
+  );
 });
 test("empty engine mode produces a native search result; typing leaves remote providers eligible", async () => {
   const t = providerFixture(),
@@ -138,7 +169,15 @@ test("empty engine mode produces a native search result; typing leaves remote pr
   await t.provider.startQuery(t.context, (_, result) => results.push(result));
   assert.equal(results[0].payload.engine, "YouTube");
   assert.equal(results[0].payload.suggestion, "guitar");
+  assert.equal(results[0].heuristic, true);
   assert.equal(t.provider.getPriority({ ...t.context, searchString: "g" }), 0);
+});
+test("visited search history is available with Zen default form fill disabled", async () => {
+  const t = providerFixture({ formFill: false }),
+    results = [];
+  assert.equal(await t.provider.isActive(t.context), true);
+  await t.provider.startQuery(t.context, (_, result) => results.push(result));
+  assert.equal(results[0].payload.suggestion, "from visits");
 });
 test("a cancelled query never inserts stale recent searches", async () => {
   const t = providerFixture({ delayed: true }),

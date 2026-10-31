@@ -13,7 +13,10 @@
   min-width: 0 !important;
   width: min(765px, calc(100vw - 40px)) !important;
   max-width: calc(100vw - 40px) !important;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif !important;
   font-size: 18px !important;
   color: light-dark(#202020, #f5f5f5) !important;
   border-radius: 12px !important;
@@ -32,6 +35,7 @@
   }
   & .urlbar-input-box {
     font-weight: 500 !important;
+    margin-inline-start: 0 !important;
   }
   & .urlbar-input::placeholder {
     color: light-dark(#767676, #999) !important;
@@ -100,6 +104,7 @@
     padding-block: 0 !important;
     border-radius: 6px !important;
     background: transparent !important;
+    align-items: center !important;
   }
   & .urlbarView-title,
   & .urlbarView-title strong {
@@ -123,13 +128,18 @@
     background-color: transparent !important;
     fill: white !important;
   }
-  &[searchmode] .urlbarView-row[type="search"] {
+  &[data-personal-search-provider]
+    .urlbarView-row:is(
+      [type="search"],
+      [type="formhistory"],
+      [type="form_history"]
+    ) {
     & .urlbarView-action,
     & .urlbarView-title-separator {
       display: none !important;
     }
     & .urlbarView-favicon {
-      list-style-image: url("chrome://global/skin/icons/search-glass.svg") !important;
+      content: url("chrome://global/skin/icons/search-glass.svg") !important;
     }
   }
   @media (forced-colors: active) {

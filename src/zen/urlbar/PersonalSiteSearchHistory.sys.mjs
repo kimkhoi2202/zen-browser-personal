@@ -80,12 +80,14 @@ export class PersonalSiteSearchHistory extends UrlbarProvider {
       }
     }
     if (instance !== this.queryInstance) return;
+    let index = 0;
     for (const term of recentSearchTerms(entries, context.searchString)) {
       addCallback(
         this,
         new lazy.UrlbarResult({
           type: lazy.UrlbarShared.RESULT_TYPE.SEARCH,
           source: lazy.UrlbarShared.RESULT_SOURCE.HISTORY,
+          heuristic: !context.searchString && index++ === 0,
           payload: {
             engine: engine.name,
             suggestion: term,
