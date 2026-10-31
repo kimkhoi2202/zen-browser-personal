@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Standalone unit tests for ZenPipGeometry.h (no Gecko needed):
-//   clang++ -std=c++17 -O1 -Wall -Wextra -I../.. ZenPipGeometryTests.cpp \
+//   clang++ -std=c++20 -O1 -Wall -Wextra -I../.. ZenPipGeometryTests.cpp \
 //     -o /tmp/zen-pip-geometry-tests && /tmp/zen-pip-geometry-tests
 // Display layouts are AppKit global coordinates (y up, primary at 0,0).
 
