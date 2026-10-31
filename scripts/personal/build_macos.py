@@ -59,7 +59,8 @@ def verify_source_built(metadata):
                                         (stamp,'HEAD','was not built from an ancestor of this checkout')):
         if subprocess.run(['git','merge-base','--is-ancestor',ancestor,descendant],cwd=ROOT,capture_output=True).returncode:
             raise RuntimeError('Source-built engine '+problem)
-    changed=engine_affecting(subprocess.check_output(['git','diff','--name-only',stamp,'HEAD'],cwd=ROOT,text=True).split())
+    paths=subprocess.check_output(['git','diff','--name-only','-z',stamp,'HEAD'],cwd=ROOT,text=True)
+    changed=engine_affecting([p for p in paths.split('\0') if p])
     if changed:
         raise RuntimeError('Compiled sources changed since the engine was built; rebuild it: '+', '.join(changed[:8]))
     return stamp

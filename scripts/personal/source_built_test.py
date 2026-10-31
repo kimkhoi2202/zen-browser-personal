@@ -8,7 +8,8 @@ class SourceBuiltEngine(unittest.TestCase):
         self.assertEqual(engine_affecting([
             'personal/channels.json', 'personal/launcher.c', 'scripts/personal/build_macos.py',
             'src/zen/urlbar/PersonalCommandActions.mjs', 'src/zen/urlbar/ZenUrlbarController.mjs',
-            'locales/en-US/browser/browser/zen-command-palette.ftl', 'README.md', 'docs/index.md']), [])
+            'locales/en-US/browser/browser/zen-command-palette.ftl', 'README.md', 'docs/index.md',
+            'Generation Scripts/README.md', 'personal/Yab-style PiP.md']), [])
 
     def test_compiled_sources_need_an_engine_rebuild(self):
         compiled = ['src/zen/pip/ZenPipNativeChrome.mm', 'prefs/zen/view.yaml', 'src/zen/urlbar/moz.build',
