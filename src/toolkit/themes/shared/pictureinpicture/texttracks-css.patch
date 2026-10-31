@@ -1,0 +1,36 @@
+diff --git a/toolkit/themes/shared/pictureinpicture/texttracks.css b/toolkit/themes/shared/pictureinpicture/texttracks.css
+index be187ee9ba88f96f77ed19bd58a9165b1005a3eb..c52edd794a70bdc98dd131e000818db7b8dafa92 100644
+--- a/toolkit/themes/shared/pictureinpicture/texttracks.css
++++ b/toolkit/themes/shared/pictureinpicture/texttracks.css
+@@ -78,3 +78,31 @@
+     display: none;
+   }
+ }
++
++/* Zen: captions in the system caption style (System Settings > Accessibility >
++ * Captions), the same MediaAccessibility preferences Apple's own players use.
++ * PictureInPictureChild.zenApplyCaptionStyle() sets these properties. */
++:root[zen-caption-style] #texttracks {
++  opacity: 1;
++  color: var(--zen-cue-color);
++  background-color: var(--zen-cue-box);
++  border-radius: var(--zen-cue-radius);
++  font-family: var(--zen-cue-font);
++  font-weight: var(--zen-cue-weight);
++  text-shadow: var(--zen-cue-shadow);
++  font-size: clamp(var(--min-font-size), calc(var(--font-scale) * var(--zen-cue-scale) * 100vh), var(--max-font-size));
++  line-height: 1.22;
++  padding: 0.18em 0.45em;
++  transition: bottom 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
++  transition-delay: 0s;
++}
++
++:root[zen-caption-style] #texttracks[overlap-video-controls] {
++  bottom: var(--zen-texttracks-bottom-overlapped, var(--texttracks-bottom-overlapped));
++}
++
++@media (prefers-reduced-motion) {
++  :root[zen-caption-style] #texttracks {
++    transition: none;
++  }
++}

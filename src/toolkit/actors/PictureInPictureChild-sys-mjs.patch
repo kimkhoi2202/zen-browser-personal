@@ -1,8 +1,23 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 49dd388d8304245e9e840cc32577eed45d36d62c..dde63be2eb6c442acb387b14bf05c18ce9419fa4 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..26222a0b4e25e4940fd7bc7841ae6d1f431263a5 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
-@@ -318,6 +318,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -285,6 +285,14 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+       volume: PictureInPictureChild.videoWrapper.getVolume(video),
+       playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
+       autoFocus,
++      // Zen: whether this request comes from leaving the tab (automatic PiP),
++      // so the parent does not have to guess from the docShell state (an
++      // occluded window deactivates the selected tab's docShell too).
++      isAutoPip: reason == "AutoPip",
++      // Zen: numeric position for the native timeline.
++      currentTime: PictureInPictureChild.videoWrapper.getCurrentTime(video),
++      duration: PictureInPictureChild.videoWrapper.getDuration(video),
++      isLive: PictureInPictureChild.videoWrapper.isLive(video),
+     });
+ 
+     // Some tests don't bother setting a reason.
+@@ -346,6 +354,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        if (
          video &&
          PictureInPictureChild.videoIsPlaying(video) &&
@@ -10,3 +25,128 @@ index 49dd388d8304245e9e840cc32577eed45d36d62c..dde63be2eb6c442acb387b14bf05c18c
          PictureInPictureChild.videoIsPiPEligible(video)
        ) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
+@@ -1847,8 +1856,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+     const textTracksFontScale = this.document
+       .querySelector(":root")
+       .style.getPropertyValue("--font-scale");
++    // Zen: with the native chrome, captions still make room for the timeline
++    // under Reduce Motion (the stylesheet drops the transition instead).
++    const zenCaptionStyle =
++      this.document.documentElement.hasAttribute("zen-caption-style");
+ 
+-    if (isFullscreen || isReducedMotionEnabled) {
++    if (isFullscreen || (isReducedMotionEnabled && !zenCaptionStyle)) {
+       textTracks.removeAttribute("overlap-video-controls");
+       return;
+     }
+@@ -1866,6 +1879,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         } else {
+           root.style.setProperty("--player-controls-scrubber-height", "0px");
+         }
++        // Zen: just above the native timeline, whose top edge is reported
++        // (only used once the system caption style is applied).
++        root.style.setProperty(
++          "--zen-texttracks-bottom-overlapped",
++          `${playerVideoRect.bottom - playerBottomControlsDOMRect.top + 4}px`
++        );
+         textTracks.setAttribute("overlap-video-controls", true);
+       } else {
+         textTracks.removeAttribute("overlap-video-controls");
+@@ -2181,6 +2200,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+             {
+               scrubberPosition,
+               timestamp,
++              // Zen: numeric values for the native timeline.
++              currentTime,
++              duration,
++              isLive: this.videoWrapper.isLive(video),
+             }
+           );
+         }
+@@ -2291,12 +2314,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         let selectedTime;
+         let video = this.getWeakVideo();
+         let currentTime = this.videoWrapper.getCurrentTime(video);
++        // Zen: callers may pass the seek amount (seconds).
++        let seekSeconds =
++          message.data?.seconds > 0 ? message.data.seconds : SEEK_TIME_SECS;
+         if (message.name == "PictureInPicture:SeekBackward") {
+-          selectedTime = currentTime - SEEK_TIME_SECS;
++          selectedTime = currentTime - seekSeconds;
+           selectedTime = selectedTime >= 0 ? selectedTime : 0;
+         } else {
+           const maxtime = this.videoWrapper.getDuration(video);
+-          selectedTime = currentTime + SEEK_TIME_SECS;
++          selectedTime = currentTime + seekSeconds;
+           selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
+         }
+         this.videoWrapper.setCurrentTime(video, selectedTime);
+@@ -2326,6 +2352,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         this.toggleTextTracks();
+         break;
+       }
++      case "PictureInPicture:ZenCaptionStyle": {
++        this.zenApplyCaptionStyle(message.data);
++        break;
++      }
+       case "PictureInPicture:ChangeFontSizeTextTracks": {
+         this.setTextTrackFontSize();
+         break;
+@@ -2409,6 +2439,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
+    * Set the font size on the PiP window using the current font size value from
+    * the "media.videocontrols.picture-in-picture.display-text-tracks.size" pref
+    */
++  /**
++   * Zen: renders captions in the system caption style (System Settings >
++   * Accessibility > Captions), as Apple's own players do. The native chrome
++   * reads it through MediaAccessibility and sends CSS-ready values; null
++   * restores the stock look.
++   *
++   * @param {object|null} style
++   */
++  zenApplyCaptionStyle(style) {
++    const root = this.document?.documentElement;
++    if (!root) {
++      return;
++    }
++    if (!style) {
++      root.removeAttribute("zen-caption-style");
++      return;
++    }
++    const properties = {
++      "--zen-cue-color": style.color,
++      "--zen-cue-box": style.box,
++      "--zen-cue-radius": `${Number(style.radius) || 0}px`,
++      "--zen-cue-font": style.font,
++      "--zen-cue-weight": String(Number(style.weight) || 500),
++      "--zen-cue-shadow": style.shadow,
++      "--zen-cue-scale": String(Number(style.scale) || 1),
++    };
++    for (const [name, value] of Object.entries(properties)) {
++      if (typeof value == "string") {
++        root.style.setProperty(name, value);
++      }
++    }
++    root.setAttribute("zen-caption-style", "");
++  }
++
+   setTextTrackFontSize() {
+     const fontSize = Services.prefs.getStringPref(
+       TEXT_TRACK_FONT_SIZE,
+@@ -2652,6 +2716,16 @@ export class PictureInPictureChild extends JSWindowActorChild {
+       },
+       { once: true }
+     );
++
++    // Zen: the request's "playing" flag also requires readyState > 2, so a
++    // video that was still seeking when the player opened showed as paused,
++    // and no further "play" event comes while it keeps playing. Sync the
++    // real state once the player is set up.
++    this.sendAsyncMessage(
++      !originatingVideo.paused && !originatingVideo.ended
++        ? "PictureInPicture:Playing"
++        : "PictureInPicture:Paused"
++    );
+   }
+ 
+   #onResizeNotifyPictureInPictureWindowInstance() {

@@ -1,0 +1,42 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+EXTRA_JS_MODULES.zen.pip += [
+    "ZenPipNativeControls.sys.mjs",
+]
+
+XPIDL_SOURCES += [
+    "nsIZenPipNativePlayer.idl",
+]
+
+XPIDL_MODULE = "zen_pip"
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
+    EXPORTS.mozilla += [
+        "nsZenPipNativePlayer.h",
+    ]
+
+    SOURCES += [
+        "nsZenPipNativePlayer.mm",
+        "ZenPipNativeChrome.mm",
+    ]
+
+    # The AppKit chrome is self-contained (no Gecko headers) and uses ARC so
+    # its views, timers, observers and display link are released reliably.
+    SOURCES["ZenPipNativeChrome.mm"].flags += ["-fobjc-arc"]
+
+    # The system caption style (System Settings > Accessibility > Captions).
+    OS_LIBS += [
+        "-framework MediaAccessibility",
+    ]
+
+    XPCOM_MANIFESTS += [
+        "components.conf",
+    ]
+
+    LOCAL_INCLUDES += [
+        "/widget",
+    ]
+
+    FINAL_LIBRARY = "xul"
