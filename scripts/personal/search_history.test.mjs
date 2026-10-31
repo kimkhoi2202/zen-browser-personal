@@ -122,13 +122,15 @@ function providerFixture({
     finish: () => finish([{ value: "old", lastUsed: 1 }]),
   };
 }
-test("history provider does not expose saved searches in private windows or with history disabled", () => {
+test("history provider uses the native async activation contract and excludes private/disabled history", async () => {
   for (const patch of [{ isPrivate: true }, { enabled: false }]) {
     const t = providerFixture(patch);
-    assert.equal(t.provider.isActive(t.context), false);
+    const activation = t.provider.isActive(t.context);
+    assert.equal(typeof activation.then, "function");
+    assert.equal(await activation, false);
   }
   const t = providerFixture();
-  assert.equal(t.provider.isActive({ ...t.context, searchMode: null }), false);
+  assert.equal(await t.provider.isActive({ ...t.context, searchMode: null }), false);
 });
 test("empty engine mode produces a native search result; typing leaves remote providers eligible", async () => {
   const t = providerFixture(),

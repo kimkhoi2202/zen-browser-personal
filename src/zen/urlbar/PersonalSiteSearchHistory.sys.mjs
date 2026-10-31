@@ -29,7 +29,7 @@ export class PersonalSiteSearchHistory extends UrlbarProvider {
   get name() {
     return "PersonalSiteSearchHistory";
   }
-  isActive(context) {
+  async isActive(context) {
     return (
       !!context.searchMode?.engineName &&
       !context.isPrivate &&
