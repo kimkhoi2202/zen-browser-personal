@@ -92,3 +92,19 @@ def patch_input(source):
       this.inputField, "personal-command-palette-search"
     );
 ''' + anchor)
+
+
+def patch_view(source):
+    anchor = '''  #shouldShowHeuristic(result) {
+'''
+    if source.count(anchor) != 1 or 'PersonalSiteSearchHistory' in source:
+        raise RuntimeError('Upstream result visibility changed or already patched; use a clean base')
+    return source.replace(anchor, anchor + '''    // Recent engine searches and explicit browser commands are selectable
+    // actions, not the redundant web-search heuristic hidden by Zen.
+    if (result?.heuristic && (
+      result.providerName === "PersonalSiteSearchHistory" ||
+      result.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS
+    )) {
+      return true;
+    }
+''')

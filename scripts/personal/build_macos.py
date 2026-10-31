@@ -16,12 +16,13 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from ui_patch import patch_controller, patch_input, patch_addons_styles, patch_findbar_position, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE, CONTENT_AREA_CSS_ARCHIVE
+from ui_patch import patch_controller, patch_input, patch_view, patch_addons_styles, patch_findbar_position, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE, CONTENT_AREA_CSS_ARCHIVE
 
 ROOT=Path(__file__).resolve().parents[2]
 CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
 CONTROLLER='chrome/browser/content/browser/urlbar/UrlbarChildController.mjs'
 INPUT_BASE='chrome/browser/content/browser/urlbar/UrlbarInputBase.mjs'
+VIEW='chrome/browser/content/browser/urlbar/UrlbarView.mjs'
 ZEN_CONTROLLER='modules/zen/urlbar/ZenUrlbarController.mjs'
 HELPER='modules/zen/urlbar/PersonalSiteSearch.mjs'
 ADDITIONAL_UI={
@@ -109,6 +110,7 @@ def build(base,channel,identity,output):
         original=(extracted/CONTROLLER).read_text()
         (extracted/CONTROLLER).write_text(patch_controller(original))
         (extracted/INPUT_BASE).write_text(patch_input((extracted/INPUT_BASE).read_text()))
+        (extracted/VIEW).write_text(patch_view((extracted/VIEW).read_text()))
         (extracted/ZEN_CONTROLLER).write_bytes((ROOT/'src/zen/urlbar/ZenUrlbarController.mjs').read_bytes())
         (extracted/HELPER).write_bytes((ROOT/'src/zen/urlbar/PersonalSiteSearch.mjs').read_bytes())
         for destination,source in ADDITIONAL_UI.items():
