@@ -37,16 +37,21 @@ constexpr CGFloat kReferenceWidth = 640;
 constexpr CGFloat kResizeBand = 9;
 constexpr CGFloat kResizeCornerBand = 18;
 constexpr CGFloat kDragThreshold = 3;
-// How far past the display edge a drag must push (a quarter of the player,
-// within these bounds, in points) before the player hops onto the display
-// under the pointer.
+// Crossing onto another display while dragging: the drag must push past the
+// edge by a quarter of the player (within these bounds, in points) with the
+// pointer at least kCrossDisplayPointerInset inside the other display, and
+// keep that up for kCrossDisplayHold seconds. Until then the player stays at
+// the edge of its display, so throwing or pushing it into a corner shared
+// with another display always lands in that corner.
 constexpr double kCrossDisplayPushFraction = 0.25;
 constexpr double kCrossDisplayPushMin = 48;
 constexpr double kCrossDisplayPushMax = 160;
+constexpr CGFloat kCrossDisplayPointerInset = 16;
+constexpr NSTimeInterval kCrossDisplayHold = 0.22;
 constexpr NSTimeInterval kInitialRevealDuration = 2.5;
 
 struct Config {
-  double edgeGap = 14;
+  double edgeGap = 10;
   SpringParams spring{0.42, 0.86};
   ReleaseParams release;
   SizeLimits limits;
@@ -751,6 +756,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL mClearGlass;
   // Display the user dragged the player onto (0: follow the source window).
   CGDirectDisplayID mHomeDisplay;
+  // Pushing at the edge toward another display: since when (event time, 0 if
+  // not), and a one-shot check at the end of the hold for a pointer at rest.
+  NSTimeInterval mEdgeHoldStart;
+  NSTimer* mEdgeHoldTimer;
+  NSPoint mLastGesturePoint;
 }
 
 + (BOOL)hasLiquidGlass {
@@ -2009,6 +2019,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSWindow* window = mWindow;
   // New input catches the player wherever it currently is.
   [self stopAnimation];
+  [self cancelEdgeHold];
   mGestureStartMouse = aScreenPoint;
   mGestureStartFrame = window.frame;
   mGestureDock = DetectDock(ToRect(window.frame), [self allowedArea], 2);
@@ -2060,7 +2071,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     NSPoint pointer = mGesture == ZenPipGestureCarry
                           ? NSMakePoint(desired.x + size.x / 2, desired.y + size.y / 2)
                           : aScreenPoint;
-    BOOL hopped = [self followDrag:desired size:size ontoDisplayAt:pointer];
+    mLastGesturePoint = aScreenPoint;
+    BOOL hopped = [self followDrag:desired size:size ontoDisplayAt:pointer time:aTime];
     Vec2 origin = RubberBandOrigin(desired, size, [self allowedArea], [self visibleFrame]);
     [self setWindowOrigin:origin];
     if (hopped) {
@@ -2079,31 +2091,69 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 // Dragging past the edge of the player's display onto another display moves
-// it there. It holds at the edge first, so pushing it against an edge shared
-// with another display never switches displays by accident: it hops only
-// once the pointer is on the other display and the push is deliberate.
-- (BOOL)followDrag:(Vec2)aDesired size:(Vec2)aSize ontoDisplayAt:(NSPoint)aPointer {
+// it there. It stays at the edge of its display first: it hops only once the
+// pointer is well onto the other display, the push is deliberate and has
+// lasted kCrossDisplayHold. Throwing or pushing it into a corner or edge it
+// shares with another display therefore always lands there.
+- (BOOL)followDrag:(Vec2)aDesired
+              size:(Vec2)aSize
+     ontoDisplayAt:(NSPoint)aPointer
+              time:(NSTimeInterval)aTime {
   NSScreen* home = [self homeScreen];
   NSScreen* target = nil;
   for (NSScreen* screen in NSScreen.screens) {
-    if (DisplayID(screen) != DisplayID(home) && NSPointInRect(aPointer, screen.frame)) {
+    if (DisplayID(screen) != DisplayID(home) &&
+        NSPointInRect(aPointer, NSInsetRect(screen.frame, kCrossDisplayPointerInset,
+                                            kCrossDisplayPointerInset))) {
       target = screen;
       break;
     }
-  }
-  if (!target) {
-    return NO;
   }
   Vec2 push = aDesired - ClampOrigin(aDesired, aSize, [self allowedArea]);
   bool horizontal = std::abs(push.x) >= std::abs(push.y);
   double needed = std::clamp(kCrossDisplayPushFraction * (horizontal ? aSize.x : aSize.y),
                              kCrossDisplayPushMin, kCrossDisplayPushMax);
-  if (std::max(std::abs(push.x), std::abs(push.y)) < needed) {
+  if (!target || std::max(std::abs(push.x), std::abs(push.y)) < needed) {
+    [self cancelEdgeHold];
     return NO;
   }
+  if (mEdgeHoldStart <= 0) {
+    mEdgeHoldStart = aTime;
+    // If the pointer then rests, nothing else would re-check: look again
+    // once the hold is over.
+    __weak ZenPipPlayerChrome* weakSelf = self;
+    mEdgeHoldTimer = [NSTimer
+        scheduledTimerWithTimeInterval:kCrossDisplayHold + 0.01
+                               repeats:NO
+                                 block:^(NSTimer*) {
+                                   ZenPipPlayerChrome* chrome = weakSelf;
+                                   if (chrome && chrome->mEdgeHoldStart > 0 &&
+                                       (chrome->mGesture == ZenPipGestureDrag ||
+                                        chrome->mGesture == ZenPipGestureCarry)) {
+                                     chrome->mEdgeHoldTimer = nil;
+                                     [chrome gestureMovedTo:chrome->mLastGesturePoint
+                                                       time:std::max(
+                                                                NSProcessInfo.processInfo
+                                                                    .systemUptime,
+                                                                chrome->mEdgeHoldStart +
+                                                                    kCrossDisplayHold)];
+                                   }
+                                 }];
+    return NO;
+  }
+  if (aTime - mEdgeHoldStart < kCrossDisplayHold) {
+    return NO;
+  }
+  [self cancelEdgeHold];
   // Back on the source window's display it follows that window again.
   mHomeDisplay = DisplayID(target) == DisplayID([self sourceScreen]) ? 0 : DisplayID(target);
   return YES;
+}
+
+- (void)cancelEdgeHold {
+  mEdgeHoldStart = 0;
+  [mEdgeHoldTimer invalidate];
+  mEdgeHoldTimer = nil;
 }
 
 - (void)fadeInAfterHop {
@@ -2131,6 +2181,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSWindow* window = mWindow;
   ZenPipGesture gesture = mGesture;
   mGesture = ZenPipGestureNone;
+  [self cancelEdgeHold];
   if (!window) {
     return;
   }
@@ -2469,6 +2520,32 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self gestureEndedAt:end time:tEnd + 0.004 clickCount:0];
 }
 
+- (void)testDragBy:(NSPoint)aDelta
+              duration:(NSTimeInterval)aDuration
+     restBeforeRelease:(NSTimeInterval)aRest {
+  NSWindow* window = mWindow;
+  if (!window) {
+    return;
+  }
+  NSPoint start = NSMakePoint(NSMidX(window.frame), NSMidY(window.frame));
+  NSTimeInterval t0 = NSProcessInfo.processInfo.systemUptime;
+  [self beginGestureAt:start time:t0];
+  mGesture = ZenPipGesturePending;
+  int steps = std::max(2, (int)lround(aDuration * 120));
+  for (int i = 1; i <= steps; i++) {
+    double f = (double)i / steps;
+    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f, start.y + aDelta.y * f)
+                    time:t0 + aDuration * f];
+  }
+  [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:aRest]];
+  NSPoint end = mLastGesturePoint;
+  NSTimeInterval tEnd = std::max(NSProcessInfo.processInfo.systemUptime, t0 + aDuration + aRest);
+  mSamples.clear();
+  mSamples.push_back({tEnd - 0.05, {end.x, end.y}});
+  mSamples.push_back({tEnd, {end.x, end.y}});
+  [self gestureEndedAt:end time:tEnd + 0.004 clickCount:0];
+}
+
 - (void)testCarryBy:(NSPoint)aDelta {
   // 16 ms apart, then the fingers rest 150 ms before lifting, so the release
   // is a placement rather than a throw.
@@ -2572,6 +2649,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   }
   mInvalidated = YES;
   [self stopAnimation];
+  [self cancelEdgeHold];
   [mHideTimer invalidate];
   mHideTimer = nil;
   for (id observer in mObservers) {

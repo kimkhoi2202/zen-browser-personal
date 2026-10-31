@@ -25,7 +25,7 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "zen.pip.native-controls.enabled",
   true
 );
-XPCOMUtils.defineLazyPreferenceGetter(lazy, "EDGE_GAP", "zen.pip.edge-gap", 14);
+XPCOMUtils.defineLazyPreferenceGetter(lazy, "EDGE_GAP", "zen.pip.edge-gap", 10);
 
 const PLACEMENT_PREF = "zen.pip.last-placement";
 const TEXT_TRACK_FONT_SIZE_PREF =

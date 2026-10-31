@@ -11,7 +11,7 @@
 # Gap (points) kept between the player and the edges of the usable display
 # area (menu bar and Dock excluded).
 - name: zen.pip.edge-gap
-  value: 14
+  value: 10
 
 # Glide spring: undamped period in ms and damping ratio in percent (100 is
 # critically damped, lower allows a slight settle).

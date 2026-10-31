@@ -92,6 +92,11 @@ class ChromeHost {
 - (void)testDragBy:(NSPoint)aDelta
           duration:(NSTimeInterval)aDuration
            release:(NSPoint)aReleaseVelocity;
+// Like testDragBy, but the pointer then rests where it ended (the run loop
+// spins for `aRest` seconds) before a release without velocity.
+- (void)testDragBy:(NSPoint)aDelta
+              duration:(NSTimeInterval)aDuration
+     restBeforeRelease:(NSTimeInterval)aRest;
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta;
 // Two-finger carry: synthesized continuous scroll events (began, changed,
 // ended) through the real scroll handler; `aDelta` is the finger travel.

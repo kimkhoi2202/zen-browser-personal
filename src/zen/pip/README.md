@@ -72,15 +72,20 @@ background is drawn as the caption box when the box itself is transparent.
 ## Displays
 
 The player lives on its *home* display: by default the display of the source
-browser window (it follows that window to another display). Dragging it past
-the edge of its display holds it at the edge; once the pointer is on another
-display and the drag has pushed at least a quarter of the player's size past
-the edge (48-160 pt), it hops onto that display (no flight across, so it is
-never split between displays) and keeps moving 1:1 with the pointer. That
-display becomes its home: it stays there while the source window moves, until
-it is dragged back (then it follows the source window again). If the home
-display disconnects it falls back to the source window's display, and returns
-when the display comes back. Throws never change displays.
+browser window (it follows that window to another display), always fully
+inside its usable area with a 10 pt gap. Dragging it past the edge of its
+display holds it at that edge, so it can be put exactly into a corner or edge
+shared with another display. It crosses only when the drag keeps pushing:
+the pointer at least 16 pt onto the other display and the drag at least a
+quarter of the player's size past the edge (48-160 pt), sustained for
+0.22 s (a one-shot timer covers a pointer held still). Then it hops onto that
+display (no flight across, so it is never split between displays) and keeps
+moving 1:1 with the pointer. Throws and quick pushes into a shared corner
+therefore stay on the current display. The new display becomes its home: it
+stays there while the source window moves, until it is dragged back (then it
+follows the source window again). If the home display disconnects it falls
+back to the source window's display, and returns when the display comes
+back.
 
 ## Preferences
 

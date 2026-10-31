@@ -364,10 +364,54 @@ int main(int argc, char** argv) {
                   ![held[@"homePinned"] boolValue] && [held[@"insideAllowedArea"] boolValue],
               [NSString stringWithFormat:@"pushing at the edge holds on %@ (%@)", a.localizedName,
                                          held[@"windowFrame"]]);
-        // Dragging on until the pointer is well onto B: hops and settles there.
-        double across = half + 14 + 120;
+        // A quick push or throw into the corner shared with B, the pointer
+        // well onto B: the player lands in that corner of A.
+        double across = half + 10 + 160;
         [chrome testDragBy:NSMakePoint(dir.x * across, dir.y * across)
-                  duration:0.4
+                  duration:0.12
+                   release:NSMakePoint(dir.x * 2400 + (dir.x ? 0 : 300),
+                                       dir.y * 2400 + (dir.y ? 0 : -300))];
+        WaitUntilSettled(chrome);
+        NSDictionary* corner = [chrome debugState];
+        NSString* side = dir.x > 0 ? @"right" : dir.x < 0 ? @"left" : dir.y > 0 ? @"top" : @"bottom";
+        check([corner[@"playerScreen"] isEqualToString:a.localizedName] &&
+                  ![corner[@"homePinned"] boolValue] && [corner[@"insideAllowedArea"] boolValue] &&
+                  [corner[@"dock"] rangeOfString:side].location != NSNotFound,
+              [NSString stringWithFormat:@"a quick push into the corner shared with %@ lands in %@'s %@ corner (%@)",
+                                         b.localizedName, a.localizedName, corner[@"dock"],
+                                         corner[@"windowFrame"]]);
+        // Holding it there with the pointer resting on B: hops after the hold.
+        [chrome testDragBy:NSMakePoint(dir.x * across, dir.y * across)
+                     duration:0.1
+            restBeforeRelease:0.45];
+        WaitUntilSettled(chrome);
+        NSDictionary* rested = [chrome debugState];
+        check([rested[@"playerScreen"] isEqualToString:b.localizedName] &&
+                  [rested[@"homePinned"] boolValue] && [rested[@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"holding it at the edge with the pointer on %@ moves it there (%@)",
+                                         b.localizedName, rested[@"windowFrame"]]);
+        // Back to A the same way, then carry it across in one continuous drag.
+        {
+          NSArray* rf = rested[@"windowFrame"];
+          double toEdgeNow = dir.x > 0 ? ([rf[0] doubleValue] + w / 2) - NSMinX(fb)
+                             : dir.x < 0 ? NSMaxX(fb) - ([rf[0] doubleValue] + w / 2)
+                             : dir.y > 0 ? ([rf[1] doubleValue] + h / 2) - NSMinY(fb)
+                                         : NSMaxY(fb) - ([rf[1] doubleValue] + h / 2);
+          double backNow = toEdgeNow + 10 + 160;
+          [chrome testDragBy:NSMakePoint(-dir.x * backNow, -dir.y * backNow)
+                       duration:0.1
+              restBeforeRelease:0.45];
+          WaitUntilSettled(chrome);
+          [chrome testDragBy:NSMakePoint(dir.x * 60, dir.y * 60)
+                    duration:0.2
+                     release:NSMakePoint(dir.x * 2600 + (dir.x ? 0 : 400),
+                                         dir.y * 2600 + (dir.y ? 0 : -400))];
+          WaitUntilSettled(chrome);
+        }
+        // A continuous drag well onto B: holds at the edge, then follows.
+        double carryAcross = half + 10 + 320;
+        [chrome testDragBy:NSMakePoint(dir.x * carryAcross, dir.y * carryAcross)
+                  duration:1.0
                    release:NSZeroPoint];
         bool alwaysOnOne = true;
         for (int i = 0; i < 150; i++) {
@@ -410,8 +454,8 @@ int main(int argc, char** argv) {
                         : dir.x < 0 ? NSMaxX(fb) - ([bf[0] doubleValue] + w / 2)
                         : dir.y > 0 ? ([bf[1] doubleValue] + h / 2) - NSMinY(fb)
                                     : NSMaxY(fb) - ([bf[1] doubleValue] + h / 2);
-        double back = toEdge + 120;
-        [chrome testDragBy:NSMakePoint(-dir.x * back, -dir.y * back) duration:0.4 release:NSZeroPoint];
+        double back = toEdge + 10 + 320;
+        [chrome testDragBy:NSMakePoint(-dir.x * back, -dir.y * back) duration:1.0 release:NSZeroPoint];
         WaitUntilSettled(chrome);
         Spin(0.3);
         NSDictionary* home = [chrome debugState];
