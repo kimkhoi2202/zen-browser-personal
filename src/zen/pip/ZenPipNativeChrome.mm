@@ -35,6 +35,12 @@ constexpr CGFloat kReferenceWidth = 640;
 constexpr CGFloat kResizeBand = 9;
 constexpr CGFloat kResizeCornerBand = 18;
 constexpr CGFloat kDragThreshold = 3;
+// How far past the display edge a drag must push (a quarter of the player,
+// within these bounds, in points) before the player hops onto the display
+// under the pointer.
+constexpr double kCrossDisplayPushFraction = 0.25;
+constexpr double kCrossDisplayPushMin = 48;
+constexpr double kCrossDisplayPushMax = 160;
 constexpr NSTimeInterval kInitialRevealDuration = 2.5;
 
 struct Config {
@@ -65,6 +71,10 @@ Appearance CurrentAppearance() {
 
 Box ToRect(NSRect aRect) {
   return {aRect.origin.x, aRect.origin.y, aRect.size.width, aRect.size.height};
+}
+
+CGDirectDisplayID DisplayID(NSScreen* aScreen) {
+  return [aScreen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
 }
 
 NSRect ToNSRect(const Box& aRect) {
@@ -181,6 +191,16 @@ NSString* DockName(const Dock& aDock) {
 }
 @end
 
+// Over video the glass uses the Clear variant (Apple's guidance for media,
+// paired with a dimming layer underneath); Regular is the frosted fallback.
+static void ApplyGlass(NSView* aMaterial, BOOL aClear, CGFloat aTintAlpha) {
+  if (@available(macOS 26.0, *)) {
+    NSGlassEffectView* glass = (NSGlassEffectView*)aMaterial;
+    glass.style = aClear ? NSGlassEffectViewStyleClear : NSGlassEffectViewStyleRegular;
+    glass.tintColor = aTintAlpha > 0 ? [NSColor colorWithWhite:0 alpha:aTintAlpha] : nil;
+  }
+}
+
 // A circular or capsule Liquid Glass control: an NSGlassEffectView whose
 // content view is a native button (NSVisualEffectView before macOS 26).
 @interface ZenPipGlassControl : NSView
@@ -188,12 +208,10 @@ NSString* DockName(const Dock& aDock) {
 @property(nonatomic, readonly) NSView* material;
 @property(nonatomic) BOOL capsule;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setTintAlpha:(CGFloat)aAlpha;
+- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha;
 @end
 
-@implementation ZenPipGlassControl {
-  CGFloat mTintAlpha;
-}
+@implementation ZenPipGlassControl
 
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction {
   if (!(self = [super initWithFrame:NSMakeRect(0, 0, 32, 32)])) {
@@ -211,7 +229,7 @@ NSString* DockName(const Dock& aDock) {
 
   if (@available(macOS 26.0, *)) {
     NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
-    glass.style = NSGlassEffectViewStyleRegular;
+    glass.style = NSGlassEffectViewStyleClear;
     glass.contentView = _button;
     if (@available(macOS 27.0, *)) {
       if ([glass respondsToSelector:@selector(setEffectIsInteractive:)]) {
@@ -235,12 +253,8 @@ NSString* DockName(const Dock& aDock) {
   return self;
 }
 
-- (void)setTintAlpha:(CGFloat)aAlpha {
-  mTintAlpha = aAlpha;
-  if (@available(macOS 26.0, *)) {
-    ((NSGlassEffectView*)_material).tintColor =
-        aAlpha > 0 ? [NSColor colorWithWhite:0 alpha:aAlpha] : nil;
-  }
+- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha {
+  ApplyGlass(_material, aClear, aAlpha);
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -266,7 +280,7 @@ NSString* DockName(const Dock& aDock) {
 @property(nonatomic) BOOL showsLabels;
 @property(nonatomic) CGFloat fontSize;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setTintAlpha:(CGFloat)aAlpha;
+- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha;
 @end
 
 @implementation ZenPipTimeline {
@@ -304,7 +318,7 @@ static NSTextField* MakeTimeLabel() {
 
   if (@available(macOS 26.0, *)) {
     NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
-    glass.style = NSGlassEffectViewStyleRegular;
+    glass.style = NSGlassEffectViewStyleClear;
     glass.contentView = mContent;
     _material = glass;
   } else {
@@ -323,11 +337,8 @@ static NSTextField* MakeTimeLabel() {
   return self;
 }
 
-- (void)setTintAlpha:(CGFloat)aAlpha {
-  if (@available(macOS 26.0, *)) {
-    ((NSGlassEffectView*)_material).tintColor =
-        aAlpha > 0 ? [NSColor colorWithWhite:0 alpha:aAlpha] : nil;
-  }
+- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha {
+  ApplyGlass(_material, aClear, aAlpha);
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -413,7 +424,8 @@ static NSTextField* MakeTimeLabel() {
   _control = [[ZenPipGlassControl alloc] initWithTarget:aTarget action:aAction];
   _control.button.image = Symbol(@"pip.enter", 17, NSFontWeightSemibold);
   _control.frame = NSMakeRect(0, 0, 48, 48);
-  [_control setTintAlpha:0.22];
+  // Sits over arbitrary desktop content, not video: frosted Regular glass.
+  [_control setClearGlass:NO tintAlpha:0.22];
   self.contentView = _control;
   return self;
 }
@@ -640,6 +652,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   // setConfiguration; never used in normal operation).
   NSDictionary<NSString*, NSNumber*>* mSimulatedAppearance;
   CGFloat mTintAlpha;
+  BOOL mClearGlass;
+  // Display the user dragged the player onto (0: follow the source window).
+  CGDirectDisplayID mHomeDisplay;
 }
 
 + (BOOL)hasLiquidGlass {
@@ -742,13 +757,15 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mControlsRoot.hidden = YES;
   [mOverlay addSubview:mControlsRoot];
 
+  // Created in reading order, which VoiceOver follows: window controls on the
+  // left (close, back to tab, minimize), playback options on the right.
   mClose = [self addControl:@selector(onClose:)];
+  mReturn = [self addControl:@selector(onReturn:)];
   mMinimize = [self addControl:@selector(onMinimize:)];
   mSpeed = [self addControl:@selector(onSpeed:)];
   mSpeed.capsule = YES;
   mCaptions = [self addControl:@selector(onCaptions:)];
   mSound = [self addControl:@selector(onSound:)];
-  mReturn = [self addControl:@selector(onReturn:)];
   mBack = [self addControl:@selector(onBack:)];
   mPlay = [self addControl:@selector(onPlay:)];
   mForward = [self addControl:@selector(onForward:)];
@@ -762,8 +779,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
   // Keyboard order follows the visual reading order.
   NSArray<NSView*>* order = @[
-    mClose.button, mMinimize.button, mSpeed.button, mCaptions.button,
-    mSound.button, mReturn.button, mBack.button, mPlay.button,
+    mClose.button, mReturn.button, mMinimize.button, mSpeed.button,
+    mCaptions.button, mSound.button, mBack.button, mPlay.button,
     mForward.button, mTimeline.slider
   ];
   for (NSUInteger i = 0; i < order.count; i++) {
@@ -852,21 +869,30 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)applyAppearance {
+  // Apple's guidance for glass over media: the Clear variant above a dimming
+  // layer, with bright symbols. Reduce Transparency and Increase Contrast
+  // switch to the frosted Regular variant with a darker tint instead.
+  BOOL clear = !mAppearance.reduceTransparency && !mAppearance.increaseContrast;
   CGFloat tint = mAppearance.increaseContrast ? 0.45
                  : mAppearance.reduceTransparency ? 0.32
-                                                  : 0.2;
+                                                  : 0.06;
+  mClearGlass = clear;
   mTintAlpha = tint;
   for (ZenPipGlassControl* c in [self allGlassControls]) {
-    [c setTintAlpha:tint];
+    [c setClearGlass:clear tintAlpha:tint];
   }
-  [mTimeline setTintAlpha:tint];
-  [mTuckPanel.control setTintAlpha:tint];
-  CGFloat scrim = mAppearance.increaseContrast ? 0.6 : 0.36;
+  [mTimeline setClearGlass:clear tintAlpha:tint];
+  [mTuckPanel.control setClearGlass:NO tintAlpha:std::max<CGFloat>(tint, 0.22)];
+  // The dimming layer: darker behind the top row and the timeline, lighter
+  // behind the transport controls. Keeps white symbols at >= 3:1 contrast
+  // over bright video (measured with the glass variants experiment).
+  CGFloat edge = mAppearance.increaseContrast ? 0.6 : 0.32;
+  CGFloat middle = mAppearance.increaseContrast ? 0.3 : 0.2;
   mScrimGradient.colors = @[
-    (id)[NSColor colorWithWhite:0 alpha:scrim].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:0].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:0].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:scrim * 1.1].CGColor
+    (id)[NSColor colorWithWhite:0 alpha:edge].CGColor,
+    (id)[NSColor colorWithWhite:0 alpha:middle].CGColor,
+    (id)[NSColor colorWithWhite:0 alpha:middle].CGColor,
+    (id)[NSColor colorWithWhite:0 alpha:edge * 1.1].CGColor
   ];
   [self refreshAllControls];
 }
@@ -1177,11 +1203,12 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
   CGFloat topY = H - inset - topD;
   mClose.frame = NSMakeRect(inset, topY, topD, topD);
+  mReturn.frame = NSMakeRect(inset + topD + spacing, topY, topD, topD);
   mMinimize.hidden = !showMinimize;
-  mMinimize.frame = NSMakeRect(inset + topD + spacing, topY, topD, topD);
+  mMinimize.frame = NSMakeRect(inset + 2 * (topD + spacing), topY, topD, topD);
 
   CGFloat x = W - inset;
-  for (ZenPipGlassControl* c in @[ mReturn, mSound, mCaptions, mSpeed ]) {
+  for (ZenPipGlassControl* c in @[ mSound, mCaptions, mSpeed ]) {
     BOOL show = c == mSpeed ? showSpeed : c == mCaptions ? showCaptions : YES;
     c.hidden = !show;
     if (!show) {
@@ -1559,8 +1586,29 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   return window.screen ?: NSScreen.mainScreen;
 }
 
+// The display the player lives on: the one the user dragged it onto, as long
+// as it is connected; otherwise the source window's display.
+- (nullable NSScreen*)homeScreen {
+  if (mHomeDisplay) {
+    for (NSScreen* screen in NSScreen.screens) {
+      if (DisplayID(screen) == mHomeDisplay) {
+        return screen;
+      }
+    }
+  }
+  return [self sourceScreen];
+}
+
+- (BOOL)homeIsPinned {
+  if (!mHomeDisplay) {
+    return NO;
+  }
+  NSScreen* home = [self homeScreen];
+  return home && DisplayID(home) == mHomeDisplay;
+}
+
 - (Box)visibleFrame {
-  NSScreen* screen = [self sourceScreen];
+  NSScreen* screen = [self homeScreen];
   return screen ? ToRect(screen.visibleFrame) : Box{0, 0, 1440, 900};
 }
 
@@ -1605,12 +1653,22 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     [self reportPlacement];
     return;
   }
+  if (aAnimated && area.IntersectionArea(frame) <= 0) {
+    // Arriving from another display (e.g. the one it was on disconnected).
+    [self hopToFrame:NSMakeRect(target.x, target.y, frame.width, frame.height)];
+    return;
+  }
   [self animateTo:target velocity:{} animated:aAnimated];
 }
 
 - (void)sourceScreenChanged {
   NSWindow* window = mWindow;
   if (!window || mTucked) {
+    return;
+  }
+  if ([self homeIsPinned]) {
+    // The user put the player on another display; it stays there.
+    [self settleAnimated:YES];
     return;
   }
   Box frame = ToRect(window.frame);
@@ -1623,9 +1681,18 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   Box area = [self allowedArea];
   Vec2 size = ClampSize(frame.width, mAspect, area, mConfig.limits);
   Vec2 target = OriginForPlacement(placement, size, area);
+  [self hopToFrame:NSMakeRect(target.x, target.y, size.x, size.y)];
+}
+
+// Crossing displays: fade out, move, fade back in (no flight across, so the
+// player is never split between two displays).
+- (void)hopToFrame:(NSRect)aDestination {
+  NSWindow* window = mWindow;
+  if (!window) {
+    return;
+  }
   [self stopAnimation];
-  // Crossing displays: fade out, move, fade back in (no flight across).
-  NSRect destination = NSMakeRect(target.x, target.y, size.x, size.y);
+  NSRect destination = aDestination;
   if (mAppearance.reduceMotion) {
     [window setFrame:destination display:YES];
     [self reportPlacement];
@@ -1877,16 +1944,69 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     mGesture = ZenPipGestureDrag;
   }
   if (mGesture == ZenPipGestureDrag || mGesture == ZenPipGestureCarry) {
+    Vec2 size = ToRect(mGestureStartFrame).Size();
     Vec2 desired{mGestureStartFrame.origin.x + delta.x, mGestureStartFrame.origin.y + delta.y};
-    Vec2 origin = RubberBandOrigin(desired, ToRect(mGestureStartFrame).Size(),
-                                   [self allowedArea], [self visibleFrame]);
+    // A two-finger carry has no pointer on screen; the player's center is.
+    NSPoint pointer = mGesture == ZenPipGestureCarry
+                          ? NSMakePoint(desired.x + size.x / 2, desired.y + size.y / 2)
+                          : aScreenPoint;
+    BOOL hopped = [self followDrag:desired size:size ontoDisplayAt:pointer];
+    Vec2 origin = RubberBandOrigin(desired, size, [self allowedArea], [self visibleFrame]);
     [self setWindowOrigin:origin];
+    if (hopped) {
+      // Carry on from here so the player moves 1:1 with the pointer on its
+      // new display instead of waiting at the edge.
+      mGestureStartMouse = aScreenPoint;
+      mGestureStartFrame.origin = NSMakePoint(origin.x, origin.y);
+      [self fadeInAfterHop];
+    }
   } else if (mGesture == ZenPipGestureResize) {
     Box resized = ResizeFrame(ToRect(mGestureStartFrame), mResizeHandle,
                                {delta.x, delta.y}, mAspect, mGestureDock,
                                [self allowedArea], mConfig.limits);
     [window setFrame:ToNSRect(resized) display:YES];
   }
+}
+
+// Dragging past the edge of the player's display onto another display moves
+// it there. It holds at the edge first, so pushing it against an edge shared
+// with another display never switches displays by accident: it hops only
+// once the pointer is on the other display and the push is deliberate.
+- (BOOL)followDrag:(Vec2)aDesired size:(Vec2)aSize ontoDisplayAt:(NSPoint)aPointer {
+  NSScreen* home = [self homeScreen];
+  NSScreen* target = nil;
+  for (NSScreen* screen in NSScreen.screens) {
+    if (DisplayID(screen) != DisplayID(home) && NSPointInRect(aPointer, screen.frame)) {
+      target = screen;
+      break;
+    }
+  }
+  if (!target) {
+    return NO;
+  }
+  Vec2 push = aDesired - ClampOrigin(aDesired, aSize, [self allowedArea]);
+  bool horizontal = std::abs(push.x) >= std::abs(push.y);
+  double needed = std::clamp(kCrossDisplayPushFraction * (horizontal ? aSize.x : aSize.y),
+                             kCrossDisplayPushMin, kCrossDisplayPushMax);
+  if (std::max(std::abs(push.x), std::abs(push.y)) < needed) {
+    return NO;
+  }
+  // Back on the source window's display it follows that window again.
+  mHomeDisplay = DisplayID(target) == DisplayID([self sourceScreen]) ? 0 : DisplayID(target);
+  return YES;
+}
+
+- (void)fadeInAfterHop {
+  NSWindow* window = mWindow;
+  if (!window || mAppearance.reduceMotion) {
+    return;
+  }
+  window.alphaValue = 0.35;
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = 0.18;
+    ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    window.animator.alphaValue = 1;
+  }];
 }
 
 - (void)overlayMouseUp:(NSEvent*)aEvent {
@@ -1938,9 +2058,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;  // our own spring handles inertia after the fingers lift
   }
   if (phase == NSEventPhaseBegan) {
-    [self beginGestureAt:NSEvent.mouseLocation time:aEvent.timestamp];
+    // The carry tracks a virtual pointer that starts at the origin and
+    // accumulates the finger deltas.
+    [self beginGestureAt:NSZeroPoint time:aEvent.timestamp];
     mGesture = ZenPipGestureCarry;
-    mGestureStartMouse = NSZeroPoint;
     [self noteActivity];
     return;
   }
@@ -2119,6 +2240,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     @"sourceScreenFrame" : screen ? rect(screen.frame) : @[],
     @"sourceVisibleFrame" : screen ? rect(screen.visibleFrame) : @[],
     @"playerScreen" : window.screen ? window.screen.localizedName : @"",
+    @"homeScreen" : [self homeScreen].localizedName ?: @"",
+    @"homePinned" : @([self homeIsPinned]),
     @"allowedArea" : rect(ToNSRect([self allowedArea])),
     @"insideAllowedArea" : @([self allowedArea].Contains(ToRect(window.frame), 0.75)),
     @"insideVisibleFrame" : @([self visibleFrame].Contains(ToRect(window.frame), 0.75)),
@@ -2150,6 +2273,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     @"firstResponder" : NSStringFromClass([window.firstResponder class]) ?: @"",
     @"focusedControl" : [self focusedControlName] ?: @"",
     @"glassTintAlpha" : @(mTintAlpha),
+    @"glassStyle" : mClearGlass ? @"clear" : @"regular",
     @"scrimVisible" : @(!mScrim.isHidden && mScrim.alphaValue > 0),
   };
 }
@@ -2233,6 +2357,31 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     mGesture = ZenPipGestureDrag;
   }
   [self gestureEndedAt:end time:tEnd + 0.004 clickCount:0];
+}
+
+- (void)testCarryBy:(NSPoint)aDelta {
+  // 16 ms apart, then the fingers rest 150 ms before lifting, so the release
+  // is a placement rather than a throw.
+  uint64_t t = (uint64_t)(NSProcessInfo.processInfo.systemUptime * 1e9);
+  auto send = [&](CGScrollPhase aPhase, double aDx, double aDy, uint64_t aAdvance) {
+    t += aAdvance;
+    CGEventRef cg = CGEventCreateScrollWheelEvent2(nullptr, kCGScrollEventUnitPixel, 2,
+                                                   (int32_t)lround(aDy), (int32_t)lround(aDx), 0);
+    if (!cg) {
+      return;
+    }
+    CGEventSetIntegerValueField(cg, kCGScrollWheelEventIsContinuous, 1);
+    CGEventSetIntegerValueField(cg, kCGScrollWheelEventScrollPhase, aPhase);
+    CGEventSetTimestamp(cg, t);
+    NSEvent* event = [NSEvent eventWithCGEvent:cg];
+    CFRelease(cg);
+    [self overlayScroll:event];
+  };
+  send(kCGScrollPhaseBegan, 0, 0, 0);
+  for (int i = 0; i < 10; i++) {
+    send(kCGScrollPhaseChanged, aDelta.x / 10, aDelta.y / 10, 16000000);
+  }
+  send(kCGScrollPhaseEnded, 0, 0, 150000000);
 }
 
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta {

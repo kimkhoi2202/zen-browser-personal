@@ -184,6 +184,16 @@ int main(int argc, char** argv) {
       Spin(1.2);
       Print([NSString stringWithFormat:@"WINDOW %ld", (long)panel.windowNumber]);
       Print([NSString stringWithFormat:@"STATE %@", JSON([chrome debugState])]);
+      // ZEN_PIP_HARNESS_CAPTURE=<png> saves a screenshot of the player window.
+      if (const char* capture = getenv("ZEN_PIP_HARNESS_CAPTURE")) {
+        NSTask* task = [NSTask
+            launchedTaskWithLaunchPath:@"/usr/sbin/screencapture"
+                             arguments:@[ @"-x", @"-o",
+                                          [NSString stringWithFormat:@"-l%ld",
+                                                                     (long)panel.windowNumber],
+                                          @(capture) ]];
+        [task waitUntilExit];
+      }
       Spin(argc > 6 ? atof(argv[6]) : 4);
     } else if ([mode isEqualToString:@"layout"]) {
       [chrome revealControlsSticky:YES];
@@ -199,6 +209,7 @@ int main(int argc, char** argv) {
         Spin(0.6);
         NSDictionary* state = [chrome debugState];
         NSMutableArray* visible = [NSMutableArray array];
+        std::vector<std::pair<NSString*, NSRect>> shown;
         for (NSDictionary* c in state[@"controls"]) {
           if (![c[@"hidden"] boolValue]) {
             [visible addObject:c[@"name"]];
@@ -206,11 +217,36 @@ int main(int argc, char** argv) {
             CGFloat d = MIN([fr[2] doubleValue], [fr[3] doubleValue]);
             check(d >= 24, [NSString stringWithFormat:@"%gx%g %@ hit target %.0fpt >= 24",
                                                      s.width, s.height, c[@"name"], d]);
+            shown.push_back({c[@"name"], NSMakeRect([fr[0] doubleValue], [fr[1] doubleValue],
+                                                    [fr[2] doubleValue], [fr[3] doubleValue])});
           }
         }
+        bool overlap = false;
+        for (size_t i = 0; i < shown.size(); i++) {
+          for (size_t j = i + 1; j < shown.size(); j++) {
+            if (NSIntersectsRect(shown[i].second, shown[j].second)) {
+              overlap = true;
+              Print([NSString stringWithFormat:@"  overlap: %@ / %@", shown[i].first,
+                                               shown[j].first]);
+            }
+          }
+        }
+        check(!overlap, [NSString stringWithFormat:@"%gx%g no two visible controls overlap",
+                                                  s.width, s.height]);
         Print([NSString stringWithFormat:@"LAYOUT %gx%g WINDOW %ld visible=%@", s.width,
                                          s.height, (long)panel.windowNumber,
                                          [visible componentsJoinedByString:@","]]);
+        // ZEN_PIP_HARNESS_CAPTURE=<prefix> saves <prefix>-<W>x<H>.png per size.
+        if (const char* prefix = getenv("ZEN_PIP_HARNESS_CAPTURE")) {
+          NSString* path = [NSString stringWithFormat:@"%s-%gx%g.png", prefix, s.width, s.height];
+          NSTask* task = [NSTask
+              launchedTaskWithLaunchPath:@"/usr/sbin/screencapture"
+                               arguments:@[ @"-x", @"-o",
+                                            [NSString stringWithFormat:@"-l%ld",
+                                                                       (long)panel.windowNumber],
+                                            path ]];
+          [task waitUntilExit];
+        }
         Spin(argc > 3 ? 0 : 1.5);
       }
     } else if ([mode isEqualToString:@"motion"]) {
@@ -282,6 +318,113 @@ int main(int argc, char** argv) {
                                          target.localizedName, before, fa]);
         [chrome testResizeHandle:@"top-left" by:NSMakePoint(160, -90)];
         Spin(0.3);
+      }
+
+      // Dragging onto another display: holds at the shared edge, hops across
+      // once the pointer is on the other display, then stays there (even when
+      // the source window moves) until dragged back.
+      if (screens.count >= 2) {
+        NSScreen* a = screens[0];
+        NSScreen* b = screens[1];
+        NSRect fa = a.frame, fb = b.frame;
+        NSPoint dir = NSMinX(fb) >= NSMaxX(fa) - 1   ? NSMakePoint(1, 0)
+                      : NSMaxX(fb) <= NSMinX(fa) + 1 ? NSMakePoint(-1, 0)
+                      : NSMinY(fb) >= NSMaxY(fa) - 1 ? NSMakePoint(0, 1)
+                                                      : NSMakePoint(0, -1);
+        NSRect avf = a.visibleFrame, bvf = b.visibleFrame;
+        auto moveSource = [&](NSRect aVisible) {
+          [source setFrame:NSMakeRect(NSMidX(aVisible) - 300, NSMidY(aVisible) - 200, 600, 400)
+                   display:NO];
+          Spin(0.2);
+          [chrome setSourceWindow:nil];
+          [chrome setSourceWindow:source];
+          Spin(0.8);
+          WaitUntilSettled(chrome);
+        };
+        moveSource(avf);
+        // Throw it against the edge facing display B (stays on A).
+        [chrome testDragBy:NSMakePoint(dir.x * 60, dir.y * 60)
+                  duration:0.2
+                   release:NSMakePoint(dir.x * 2600 + (dir.x ? 0 : 400), dir.y * 2600 + (dir.y ? 0 : -400))];
+        WaitUntilSettled(chrome);
+        NSDictionary* docked = [chrome debugState];
+        NSArray* df = docked[@"windowFrame"];
+        double w = [df[2] doubleValue], h = [df[3] doubleValue];
+        double half = dir.x ? w / 2 : h / 2;
+        check([docked[@"playerScreen"] isEqualToString:a.localizedName],
+              [NSString stringWithFormat:@"docked against the edge shared with %@ (%@)",
+                                         b.localizedName, df]);
+        // Pushing at the edge with the pointer still on A: no hop.
+        [chrome testDragBy:NSMakePoint(dir.x * (half - 24), dir.y * (half - 24))
+                  duration:0.3
+                   release:NSZeroPoint];
+        WaitUntilSettled(chrome);
+        NSDictionary* held = [chrome debugState];
+        check([held[@"playerScreen"] isEqualToString:a.localizedName] &&
+                  ![held[@"homePinned"] boolValue] && [held[@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"pushing at the edge holds on %@ (%@)", a.localizedName,
+                                         held[@"windowFrame"]]);
+        // Dragging on until the pointer is well onto B: hops and settles there.
+        double across = half + 14 + 120;
+        [chrome testDragBy:NSMakePoint(dir.x * across, dir.y * across)
+                  duration:0.4
+                   release:NSZeroPoint];
+        bool alwaysOnOne = true;
+        for (int i = 0; i < 150; i++) {
+          Spin(1.0 / 120);
+          NSDictionary* mid = [chrome debugState];
+          alwaysOnOne = alwaysOnOne && [mid[@"insideVisibleFrame"] boolValue];
+          if (![mid[@"animating"] boolValue]) break;
+        }
+        WaitUntilSettled(chrome);
+        Spin(0.3);
+        NSDictionary* moved = [chrome debugState];
+        check(alwaysOnOne && [moved[@"playerScreen"] isEqualToString:b.localizedName] &&
+                  [moved[@"homePinned"] boolValue] && [moved[@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"dragging onto %@ moves the player there (%@, pinned=%@)",
+                                         b.localizedName, moved[@"windowFrame"],
+                                         moved[@"homePinned"]]);
+        // The source window moving between displays no longer moves it.
+        moveSource(bvf);
+        moveSource(avf);
+        NSDictionary* stays = [chrome debugState];
+        check([stays[@"playerScreen"] isEqualToString:b.localizedName] &&
+                  [stays[@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"stays on %@ while the source window moves (%@)",
+                                         b.localizedName, stays[@"windowFrame"]]);
+        // Two-finger carry moves it by the finger travel (no jump).
+        NSArray* c0 = stays[@"windowFrame"];
+        [chrome testCarryBy:NSMakePoint(dir.x ? 0 : 90, dir.x ? 90 : 0)];
+        WaitUntilSettled(chrome);
+        NSArray* c1 = [chrome debugState][@"windowFrame"];
+        double cdx = [c1[0] doubleValue] - [c0[0] doubleValue];
+        double cdy = [c1[1] doubleValue] - [c0[1] doubleValue];
+        check(std::abs(std::hypot(cdx, cdy) - 90) < 30 && [[chrome debugState][@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"two-finger carry moves by the finger travel (%.0f, %.0f)",
+                                         cdx, cdy]);
+        // Drag back onto A: it hops back and follows the source window again.
+        NSDictionary* beforeBack = [chrome debugState];
+        NSArray* bf = beforeBack[@"windowFrame"];
+        // Distance from the player's center to the shared edge, plus margin.
+        double toEdge = dir.x > 0 ? ([bf[0] doubleValue] + w / 2) - NSMinX(fb)
+                        : dir.x < 0 ? NSMaxX(fb) - ([bf[0] doubleValue] + w / 2)
+                        : dir.y > 0 ? ([bf[1] doubleValue] + h / 2) - NSMinY(fb)
+                                    : NSMaxY(fb) - ([bf[1] doubleValue] + h / 2);
+        double back = toEdge + 120;
+        [chrome testDragBy:NSMakePoint(-dir.x * back, -dir.y * back) duration:0.4 release:NSZeroPoint];
+        WaitUntilSettled(chrome);
+        Spin(0.3);
+        NSDictionary* home = [chrome debugState];
+        check([home[@"playerScreen"] isEqualToString:a.localizedName] &&
+                  ![home[@"homePinned"] boolValue] && [home[@"insideAllowedArea"] boolValue],
+              [NSString stringWithFormat:@"dragging back onto %@ returns it (%@)", a.localizedName,
+                                         home[@"windowFrame"]]);
+        moveSource(bvf);
+        NSDictionary* follows = [chrome debugState];
+        check([follows[@"playerScreen"] isEqualToString:b.localizedName],
+              [NSString stringWithFormat:@"after returning it follows the source window again (%@)",
+                                         follows[@"playerScreen"]]);
+        moveSource(avf);
       }
       // Minimize tucks into a fully visible pill and restores the player.
       [chrome minimize];

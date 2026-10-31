@@ -93,6 +93,9 @@ class ChromeHost {
           duration:(NSTimeInterval)aDuration
            release:(NSPoint)aReleaseVelocity;
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta;
+// Two-finger carry: synthesized continuous scroll events (began, changed,
+// ended) through the real scroll handler; `aDelta` is the finger travel.
+- (void)testCarryBy:(NSPoint)aDelta;
 - (BOOL)testClickControl:(NSString*)aName;
 - (void)testKey:(unsigned short)aKeyCode
      characters:(NSString*)aCharacters
