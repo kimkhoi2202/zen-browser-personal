@@ -73,9 +73,7 @@ struct Dock {
   VEdge v = VEdge::None;
 
   bool IsCorner() const { return h != HEdge::None && v != VEdge::None; }
-  bool operator==(const Dock& aOther) const {
-    return h == aOther.h && v == aOther.v;
-  }
+  bool operator==(const Dock& aOther) const = default;
 };
 
 // Screen-independent description of where the player rests, used to carry a
