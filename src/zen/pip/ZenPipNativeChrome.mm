@@ -2130,7 +2130,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                  }];
     return NO;
   }
-  if (aTime - mEdgeHoldStart < kCrossDisplayHold) {
+  // The timer re-checks at exactly mEdgeHoldStart + kCrossDisplayHold; at
+  // uptimes of days that sum loses enough precision to land a hair short.
+  if (aTime - mEdgeHoldStart < kCrossDisplayHold - 1e-6) {
     return NO;
   }
   [self cancelEdgeHold];
