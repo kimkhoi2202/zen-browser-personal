@@ -77,4 +77,5 @@ restore that profile copy too: the profile now records the newer engine.
 
 Not verified natively in the daily app: the PiP itself (try a video), the
 command palette after the engine change, passkeys, DRM, 1Password unlock.
-Local builds carry no Google Safe Browsing key until the owner adds one.
+Local engines carry no Zen API keys; the daily profile supplies the owner's
+own Safe Browsing key (see Native Engine Builds.md).

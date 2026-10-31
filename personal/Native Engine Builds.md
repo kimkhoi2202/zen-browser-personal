@@ -65,7 +65,14 @@ staple, test and install exactly as for other candidates.
   owner adds their own keys there before building. Without a Safe Browsing key
   the browser cannot download Google's phishing, malware and download-
   reputation lists; Mozilla's tracking-protection lists and CoreLocation
-  geolocation are unaffected.
+  geolocation are unaffected. Without rebuilding, a key can be supplied per
+  profile: set the seven `browser.safebrowsing.*` URL prefs that contain
+  `%GOOGLE_SAFEBROWSING_API_KEY%` in `all.js` to the same URLs with the key,
+  and `browser.safebrowsing.provider.{google,google4,google5}.excludeFromGoogleSafeBrowsingKeyCheck`
+  to true (SafeBrowsing.sys.mjs otherwise disables Google providers when the
+  compiled key is the placeholder). The daily Production profile does this in
+  a marked user.js block with the owner's key restricted to the Safe Browsing
+  API; keep keys out of this repository.
 - arm64 only. `release_macos.py prepare` still requires a universal engine for
   public releases.
 - Upstream updates: merge the new stable tag, update `channels.json`, rebuild
