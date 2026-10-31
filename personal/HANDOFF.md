@@ -1,3 +1,14 @@
+# Installed Yab-style PiP — personal.15 (full-source engine)
+
+Custom /Applications/Zen.app is personal.15: the installed personal.14 command
+palette plus the Yab-style PiP, on an engine compiled from this fork
+(`build_engine.sh`, Zen's release configuration with PGO/ThinLTO, arm64) and
+packaged with `build_macos.py --source-built`. Read
+[Yab-style PiP.md](Yab-style%20PiP.md) for checks, rollback and limits, and
+[Native Engine Builds.md](Native%20Engine%20Builds.md) before rebuilding.
+Native changes now require an engine build; frontend-only changes package on
+that engine. Automatic PiP is on in the daily profile. Updates stay manual.
+
 > October 31: personal.14 is installed locally at /Applications/Zen.app, signed,
 > notarized and Gatekeeper accepted. The palette now follows the Arc reference
 > and includes local engine-scoped recent searches. 107 focused checks pass.
