@@ -79,9 +79,48 @@ def patch_input(source):
       } else if (source) {'''
     if source.count(anchor)!=1:
         raise RuntimeError('Upstream search accessibility label changed; review the patch')
-    return source.replace(anchor, '''          { name: getProviderLabel(
+    source = source.replace(anchor, '''          { name: getProviderLabel(
               engineName,
               this.controller.engineStore.getEngineByName(engineName)?.aliases
             ) }
         );
       } else if (source) {''')
+    anchor = '    this.toggleAttribute("searchmode", true);'
+    if source.count(anchor) != 1:
+        raise RuntimeError('Upstream search mode state changed; review the patch')
+    return source.replace(anchor, '''    this.document.l10n.setAttributes(
+      this.inputField, "personal-command-palette-search"
+    );
+''' + anchor)
+
+
+def patch_view(source):
+    anchor = '''  #shouldShowHeuristic(result) {
+'''
+    if source.count(anchor) != 1 or 'PersonalSiteSearchHistory' in source:
+        raise RuntimeError('Upstream result visibility changed or already patched; use a clean base')
+    source = source.replace(anchor, anchor + '''    // Recent engine searches and explicit browser commands are selectable
+    // actions, not the redundant web-search heuristic hidden by Zen.
+    if (result?.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS ||
+        (result?.heuristic && result.providerName === "PersonalSiteSearchHistory")) {
+      return true;
+    }
+''')
+    anchor = '''      if (firstResult.heuristic) {
+        // Select the heuristic result.'''
+    if source.count(anchor) != 1:
+        raise RuntimeError('Upstream first-result selection changed; review the patch')
+    return source.replace(anchor, '''      if (firstResult.heuristic ||
+          queryContext.searchMode?.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS) {
+        // Select the heuristic result.''')
+
+
+def patch_providers_manager(source):
+    anchor = '''      result.heuristic &&
+      this.context.searchMode &&
+'''
+    if source.count(anchor) != 1 or 'PersonalSiteSearchHistory' in source:
+        raise RuntimeError('Upstream empty-search filtering changed or already patched; use a clean base')
+    return source.replace(anchor, anchor + '''      !(provider.name === "PersonalSiteSearchHistory" &&
+        this.context.searchMode.engineName === result.payload.engine) &&
+''')

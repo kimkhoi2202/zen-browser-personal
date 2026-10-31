@@ -1,3 +1,10 @@
+> October 31: personal.14 is installed locally at /Applications/Zen.app, signed,
+> notarized and Gatekeeper accepted. The palette now follows the Arc reference
+> and includes local engine-scoped recent searches. 107 focused checks pass.
+> The final installed-window recheck is pending because CUA timed out globally.
+> Read Command Palette UI.md for exact native evidence, limits and rollback.
+> Installed Dev and its original profile are unchanged. No GitHub publication.
+
 > Naming migration completed October 28, 2026. Custom Zen and Crest use the
 > plain Applications names; vendor apps use the Official suffix. Bundle IDs,
 > profile paths and Zen's default-browser association are preserved. Custom Zen

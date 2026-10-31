@@ -42,6 +42,7 @@ export class nsZenUrlbarController {
   }
 
   init() {
+    document.l10n.addResourceIds(["browser/zen-command-palette.ftl"]);
     installProviderBadgeStyles(document);
     const { registerZenUrlbarProviders } = ChromeUtils.importESModule(
       "resource:///modules/ZenUBProvider.sys.mjs"
