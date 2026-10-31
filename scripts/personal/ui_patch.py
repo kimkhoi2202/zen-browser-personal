@@ -99,15 +99,20 @@ def patch_view(source):
 '''
     if source.count(anchor) != 1 or 'PersonalSiteSearchHistory' in source:
         raise RuntimeError('Upstream result visibility changed or already patched; use a clean base')
-    return source.replace(anchor, anchor + '''    // Recent engine searches and explicit browser commands are selectable
+    source = source.replace(anchor, anchor + '''    // Recent engine searches and explicit browser commands are selectable
     // actions, not the redundant web-search heuristic hidden by Zen.
-    if (result?.heuristic && (
-      result.providerName === "PersonalSiteSearchHistory" ||
-      result.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS
-    )) {
+    if (result?.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS ||
+        (result?.heuristic && result.providerName === "PersonalSiteSearchHistory")) {
       return true;
     }
 ''')
+    anchor = '''      if (firstResult.heuristic) {
+        // Select the heuristic result.'''
+    if source.count(anchor) != 1:
+        raise RuntimeError('Upstream first-result selection changed; review the patch')
+    return source.replace(anchor, '''      if (firstResult.heuristic ||
+          queryContext.searchMode?.source === UrlbarShared.RESULT_SOURCE.ZEN_ACTIONS) {
+        // Select the heuristic result.''')
 
 
 def patch_providers_manager(source):

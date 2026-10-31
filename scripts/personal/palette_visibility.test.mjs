@@ -8,6 +8,13 @@ const fixture=`class View {
     return !UrlbarPrefs.get('experimental.hideHeuristic') || result.type === UrlbarShared.RESULT_TYPE.TIP;
   }
   show(result) { return this.#shouldShowHeuristic(result); }
+  choose(firstResult, queryContext) {
+      if (firstResult.heuristic) {
+        // Select the heuristic result.
+        return this.#shouldShowHeuristic(firstResult);
+      }
+      return false;
+  }
 }`;
 const patched=execFileSync('python3',['-c','import sys; from ui_patch import patch_view; print(patch_view(sys.stdin.read()))'],
   {cwd:fileURLToPath(new URL('.',import.meta.url)),input:fixture,encoding:'utf8'});
@@ -19,6 +26,8 @@ test('hide heuristic still hides ordinary web search but keeps recent search and
   assert.equal(view.show({heuristic:true,providerName:'PersonalSiteSearchHistory'}),true);
   assert.equal(view.show({heuristic:true,source:7}),true);
   assert.equal(view.show({heuristic:true,type:5}),true);
+  assert.equal(view.choose({source:7},{searchMode:{source:7}}),true);
+  assert.equal(view.choose({source:3},{searchMode:{source:3}}),false);
 });
 const managerFixture=`class Manager {
   add(provider, result) {
