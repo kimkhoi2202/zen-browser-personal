@@ -17,5 +17,18 @@ class SourceBuiltEngine(unittest.TestCase):
         self.assertEqual(engine_affecting(compiled), compiled)
 
 
+class MachOFiles(unittest.TestCase):
+    def test_only_mach_o_files_are_signed_separately(self):
+        import tempfile
+        from pathlib import Path
+        from build_macos import is_macho
+        with tempfile.TemporaryDirectory() as directory:
+            library, text = Path(directory) / 'libclearkey.dylib', Path(directory) / 'manifest.json'
+            library.write_bytes(bytes.fromhex('cffaedfe') + bytes(28))
+            text.write_text('{}')
+            self.assertTrue(is_macho(library))
+            self.assertFalse(is_macho(text))
+
+
 if __name__ == '__main__':
     unittest.main()

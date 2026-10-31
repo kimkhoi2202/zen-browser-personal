@@ -48,6 +48,11 @@ PACKAGING_ONLY=('personal/','scripts/personal/','.github/','docs/','Generation S
                 'src/zen/urlbar/ZenUrlbarController.mjs','src/zen/urlbar/PersonalSiteSearch.mjs',
                 ADDONS_CSS_SOURCE,*ADDITIONAL_UI.values())
 
+MACHO_MAGIC={bytes.fromhex(m) for m in ('feedface','feedfacf','cefaedfe','cffaedfe','cafebabe','bebafeca')}
+
+def is_macho(path):
+    with path.open('rb') as stream:return stream.read(4) in MACHO_MAGIC
+
 def engine_affecting(paths):
     """Changed paths that only a new engine build would pick up."""
     def packaging(p):
@@ -208,6 +213,13 @@ def build(base,channel,identity,output,source_built=False):
         ROOT/'personal/launcher.c','-o',macos/'zen-personal')
     if set(subprocess.check_output(['lipo','-archs',str(macos/'zen-personal')],text=True).split())!=set(architectures):
         raise RuntimeError('Launcher and engine architectures differ')
+    # codesign --deep does not reach code under Contents/Resources: the official
+    # engine ships it (the ClearKey CDM) signed by Zen, a local engine build
+    # does not, and notarization rejects it unsigned or ad hoc.
+    if source_built:
+        for path in sorted((app/'Contents/Resources').rglob('*')):
+            if path.is_file() and not path.is_symlink() and is_macho(path):
+                run('codesign','--force','--sign',identity,'--options','runtime','--timestamp',path,capture_output=True)
     run('codesign','--force','--deep','--sign',identity,'--options','runtime','--timestamp','--entitlements',ROOT/'personal/entitlements.plist',app,capture_output=True)
     # --deep derives the non-bundle engine's identifier from its filename.
     # Keep its real signed identity aligned with the app trusted by 1Password,
