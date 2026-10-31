@@ -20,3 +20,24 @@ test('hide heuristic still hides ordinary web search but keeps recent search and
   assert.equal(view.show({heuristic:true,source:7}),true);
   assert.equal(view.show({heuristic:true,type:5}),true);
 });
+const managerFixture=`class Manager {
+  add(provider, result) {
+    if (
+      result.heuristic &&
+      this.context.searchMode &&
+      (!this.context.trimmedSearchString ||
+        (!this.context.searchMode.engineName && !result.autofill))
+    ) return false;
+    return true;
+  }
+}`;
+const managerPatch=execFileSync('python3',['-c','import sys; from ui_patch import patch_providers_manager; print(patch_providers_manager(sys.stdin.read()))'],
+  {cwd:fileURLToPath(new URL('.',import.meta.url)),input:managerFixture,encoding:'utf8'});
+const Manager=new Function(managerPatch+';return Manager;')();
+test('empty-query filtering retains only the matching engine recent-search heuristic',()=>{
+  const manager=new Manager();manager.context={searchMode:{engineName:'YouTube'},trimmedSearchString:''};
+  const result={heuristic:true,payload:{engine:'YouTube'}};
+  assert.equal(manager.add({name:'PersonalSiteSearchHistory'},result),true);
+  assert.equal(manager.add({name:'PersonalSiteSearchHistory'},{...result,payload:{engine:'Google'}}),false);
+  assert.equal(manager.add({name:'UrlbarProviderHeuristicFallback'},result),false);
+});

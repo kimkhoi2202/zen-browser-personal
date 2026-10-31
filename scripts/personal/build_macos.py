@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from ui_patch import patch_controller, patch_input, patch_view, patch_addons_styles, patch_findbar_position, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE, CONTENT_AREA_CSS_ARCHIVE
+from ui_patch import patch_controller, patch_input, patch_view, patch_providers_manager, patch_addons_styles, patch_findbar_position, ADDONS_CSS_ARCHIVE, ADDONS_CSS_SOURCE, CONTENT_AREA_CSS_ARCHIVE
 
 ROOT=Path(__file__).resolve().parents[2]
 CONFIG=json.loads((ROOT/'personal/channels.json').read_text())
@@ -129,6 +129,8 @@ def build(base,channel,identity,output):
         extract_archive(platform_archive,extracted,ADDONS_CSS_ARCHIVE)
         stylesheet=extracted/ADDONS_CSS_ARCHIVE
         stylesheet.write_text(patch_addons_styles(stylesheet.read_text(),(ROOT/ADDONS_CSS_SOURCE).read_text()))
+        manager=extracted/'moz-src/browser/components/urlbar/UrlbarProvidersManager.sys.mjs'
+        manager.write_text(patch_providers_manager(manager.read_text()))
         package_archive(extracted,platform_archive)
     plist_path=app/'Contents/Info.plist'
     plist=plistlib.loads(plist_path.read_bytes())

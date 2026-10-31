@@ -108,3 +108,14 @@ def patch_view(source):
       return true;
     }
 ''')
+
+
+def patch_providers_manager(source):
+    anchor = '''      result.heuristic &&
+      this.context.searchMode &&
+'''
+    if source.count(anchor) != 1 or 'PersonalSiteSearchHistory' in source:
+        raise RuntimeError('Upstream empty-search filtering changed or already patched; use a clean base')
+    return source.replace(anchor, anchor + '''      !(provider.name === "PersonalSiteSearchHistory" &&
+        this.context.searchMode.engineName === result.payload.engine) &&
+''')
