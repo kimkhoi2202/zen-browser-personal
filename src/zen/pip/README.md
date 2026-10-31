@@ -43,15 +43,18 @@ Patches to upstream files (in `src/`):
 
 ## Glass
 
-Over video the controls use the **Clear** glass variant above a dimming layer
-(the video is dimmed 20% while the controls show, 32-35% behind the top row and
-the timeline), with a 6% black tint — Apple's guidance for glass over media
-(WWDC25 "Meet Liquid Glass"). That keeps white symbols at >= 3:1 contrast even
-over very bright frames (measured in `Evidence/Experiments` of the preview
-project). Increase Contrast and Reduce Transparency switch to the frosted
-**Regular** variant with a 45% / 32% tint; the minimized pill sits over the
-desktop, not video, so it is always Regular. The system Liquid Glass setting
-(System Settings > Appearance) applies on top, as for any system glass.
+The glass follows Apple's published guidance for controls over media (HIG
+"Materials"; WWDC25 "Meet Liquid Glass"): the **Clear** variant, untinted (tint
+is reserved for emphasizing a primary action), above a uniform **35% dark
+dimming layer** that fades in with the controls, carrying bold white SF
+Symbols. The system applies Reduce Transparency (frostier) and Increase
+Contrast (black/white with a border) to the material itself, so the chrome
+does not switch variants; only the symbol weight follows Increase Contrast.
+The minimized pill sits over arbitrary desktop content, not video, so it uses
+the untinted **Regular** variant. The Liquid Glass look setting (System
+Settings > Appearance) changes Regular glass such as the pill; Clear glass has
+no adaptive behaviors and looks the same at any setting (measured in
+`Evidence/Experiments` of the preview project).
 
 Layout: window controls on the left — close, back to tab, minimize — and
 playback options on the right — speed, captions, sound. Creation order (which

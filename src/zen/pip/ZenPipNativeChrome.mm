@@ -49,6 +49,9 @@ constexpr double kCrossDisplayPushMax = 160;
 constexpr CGFloat kCrossDisplayPointerInset = 16;
 constexpr NSTimeInterval kCrossDisplayHold = 0.22;
 constexpr NSTimeInterval kInitialRevealDuration = 2.5;
+// Apple's dark dimming layer for Clear glass over bright content (HIG
+// "Materials": "consider adding a dark dimming layer of 35% opacity").
+constexpr CGFloat kDimmingOpacity = 0.35;
 
 struct Config {
   double edgeGap = 10;
@@ -292,13 +295,17 @@ NSString* DockName(const Dock& aDock) {
 }
 @end
 
-// Over video the glass uses the Clear variant (Apple's guidance for media,
-// paired with a dimming layer underneath); Regular is the frosted fallback.
-static void ApplyGlass(NSView* aMaterial, BOOL aClear, CGFloat aTintAlpha) {
+// Apple's guidance for glass over media (HIG "Materials", WWDC25 "Meet Liquid
+// Glass"): the Clear variant above a 35% dark dimming layer, carrying bold,
+// bright symbols, and untinted (tint is reserved for emphasizing a primary
+// action). Regular is for glass over arbitrary content. The system applies the
+// Liquid Glass look setting, Reduce Transparency and Increase Contrast to
+// both variants itself.
+static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
   if (@available(macOS 26.0, *)) {
     NSGlassEffectView* glass = (NSGlassEffectView*)aMaterial;
     glass.style = aClear ? NSGlassEffectViewStyleClear : NSGlassEffectViewStyleRegular;
-    glass.tintColor = aTintAlpha > 0 ? [NSColor colorWithWhite:0 alpha:aTintAlpha] : nil;
+    glass.tintColor = nil;
   }
 }
 
@@ -309,7 +316,7 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear, CGFloat aTintAlpha) {
 @property(nonatomic, readonly) NSView* material;
 @property(nonatomic) BOOL capsule;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha;
+- (void)setClearGlass:(BOOL)aClear;
 @end
 
 @implementation ZenPipGlassControl
@@ -354,8 +361,8 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear, CGFloat aTintAlpha) {
   return self;
 }
 
-- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha {
-  ApplyGlass(_material, aClear, aAlpha);
+- (void)setClearGlass:(BOOL)aClear {
+  ApplyGlass(_material, aClear);
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -381,7 +388,7 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear, CGFloat aTintAlpha) {
 @property(nonatomic) BOOL showsLabels;
 @property(nonatomic) CGFloat fontSize;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha;
+- (void)setClearGlass:(BOOL)aClear;
 @end
 
 @implementation ZenPipTimeline {
@@ -438,8 +445,8 @@ static NSTextField* MakeTimeLabel() {
   return self;
 }
 
-- (void)setClearGlass:(BOOL)aClear tintAlpha:(CGFloat)aAlpha {
-  ApplyGlass(_material, aClear, aAlpha);
+- (void)setClearGlass:(BOOL)aClear {
+  ApplyGlass(_material, aClear);
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -525,8 +532,8 @@ static NSTextField* MakeTimeLabel() {
   _control = [[ZenPipGlassControl alloc] initWithTarget:aTarget action:aAction];
   _control.button.image = Symbol(@"pip.enter", 17, NSFontWeightSemibold);
   _control.frame = NSMakeRect(0, 0, 48, 48);
-  // Sits over arbitrary desktop content, not video: frosted Regular glass.
-  [_control setClearGlass:NO tintAlpha:0.22];
+  // Sits over arbitrary desktop content, not video: Regular glass.
+  [_control setClearGlass:NO];
   self.contentView = _control;
   return self;
 }
@@ -691,7 +698,6 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
   ZenPipOverlayView* mOverlay;
   NSView* mScrim;
-  CAGradientLayer* mScrimGradient;
   NSView* mControlsRoot;     // NSGlassEffectContainerView (26+) or plain view
   ZenPipPassthroughView* mControls;
   ZenPipGlassControl* mClose;
@@ -752,8 +758,6 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   // Test-only overrides of the system accessibility display options (set via
   // setConfiguration; never used in normal operation).
   NSDictionary<NSString*, NSNumber*>* mSimulatedAppearance;
-  CGFloat mTintAlpha;
-  BOOL mClearGlass;
   // Display the user dragged the player onto (0: follow the source window).
   CGDirectDisplayID mHomeDisplay;
   // Pushing at the edge toward another display: since when (event time, 0 if
@@ -840,12 +844,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mOverlay.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
   mOverlay.accessibilityElement = NO;
 
+  // Apple's dark dimming layer under Clear glass over bright media: a uniform
+  // 35% black, shown with the controls.
   mScrim = [[NSView alloc] initWithFrame:mOverlay.bounds];
   mScrim.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   mScrim.wantsLayer = YES;
-  mScrimGradient = [CAGradientLayer layer];
-  mScrimGradient.locations = @[ @0, @0.28, @0.66, @1 ];
-  mScrim.layer = mScrimGradient;
+  CALayer* dimming = [CALayer layer];
+  dimming.backgroundColor = [NSColor colorWithWhite:0 alpha:kDimmingOpacity].CGColor;
+  mScrim.layer = dimming;
   mScrim.alphaValue = 0;
   mScrim.hidden = YES;
   [mOverlay addSubview:mScrim];
@@ -989,31 +995,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)applyAppearance {
-  // Apple's guidance for glass over media: the Clear variant above a dimming
-  // layer, with bright symbols. Reduce Transparency and Increase Contrast
-  // switch to the frosted Regular variant with a darker tint instead.
-  BOOL clear = !mAppearance.reduceTransparency && !mAppearance.increaseContrast;
-  CGFloat tint = mAppearance.increaseContrast ? 0.45
-                 : mAppearance.reduceTransparency ? 0.32
-                                                  : 0.06;
-  mClearGlass = clear;
-  mTintAlpha = tint;
+  // Clear glass in every mode (see ApplyGlass): the system itself makes it
+  // frostier for Reduce Transparency and black/white with a border for
+  // Increase Contrast. Only the symbol weight follows Increase Contrast here.
   for (ZenPipGlassControl* c in [self allGlassControls]) {
-    [c setClearGlass:clear tintAlpha:tint];
+    [c setClearGlass:YES];
   }
-  [mTimeline setClearGlass:clear tintAlpha:tint];
-  [mTuckPanel.control setClearGlass:NO tintAlpha:std::max<CGFloat>(tint, 0.22)];
-  // The dimming layer: darker behind the top row and the timeline, lighter
-  // behind the transport controls. Keeps white symbols at >= 3:1 contrast
-  // over bright video (measured with the glass variants experiment).
-  CGFloat edge = mAppearance.increaseContrast ? 0.6 : 0.32;
-  CGFloat middle = mAppearance.increaseContrast ? 0.3 : 0.2;
-  mScrimGradient.colors = @[
-    (id)[NSColor colorWithWhite:0 alpha:edge].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:middle].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:middle].CGColor,
-    (id)[NSColor colorWithWhite:0 alpha:edge * 1.1].CGColor
-  ];
+  [mTimeline setClearGlass:YES];
+  [mTuckPanel.control setClearGlass:NO];
   [self refreshAllControls];
 }
 
@@ -2358,6 +2347,25 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 #pragma mark Diagnostics and tests
 
+- (NSString*)glassStyleOf:(NSView*)aMaterial {
+  if (@available(macOS 26.0, *)) {
+    if ([aMaterial isKindOfClass:[NSGlassEffectView class]]) {
+      return ((NSGlassEffectView*)aMaterial).style == NSGlassEffectViewStyleClear ? @"clear"
+                                                                                 : @"regular";
+    }
+  }
+  return @"visual-effect";
+}
+
+- (BOOL)glassIsTinted:(NSView*)aMaterial {
+  if (@available(macOS 26.0, *)) {
+    if ([aMaterial isKindOfClass:[NSGlassEffectView class]]) {
+      return ((NSGlassEffectView*)aMaterial).tintColor != nil;
+    }
+  }
+  return NO;
+}
+
 - (NSDictionary<NSString*, id>*)debugState {
   NSWindow* window = mWindow;
   NSWindow* source = mSourceWindow;
@@ -2433,8 +2441,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     },
     @"firstResponder" : NSStringFromClass([window.firstResponder class]) ?: @"",
     @"focusedControl" : [self focusedControlName] ?: @"",
-    @"glassTintAlpha" : @(mTintAlpha),
-    @"glassStyle" : mClearGlass ? @"clear" : @"regular",
+    @"glassStyle" : [self glassStyleOf:mPlay.material],
+    @"glassTinted" : @([self glassIsTinted:mPlay.material]),
+    @"pillGlassStyle" : mTuckPanel ? [self glassStyleOf:mTuckPanel.control.material] : @"",
+    @"dimmingOpacity" : @(CGColorGetAlpha(mScrim.layer.backgroundColor)),
     @"scrimVisible" : @(!mScrim.isHidden && mScrim.alphaValue > 0),
   };
 }
