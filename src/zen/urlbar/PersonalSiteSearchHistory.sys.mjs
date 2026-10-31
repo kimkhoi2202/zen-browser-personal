@@ -33,8 +33,7 @@ export class PersonalSiteSearchHistory extends UrlbarProvider {
     return (
       !!context.searchMode?.engineName &&
       !context.isPrivate &&
-      Services.prefs.getBoolPref("browser.urlbar.suggest.history", true) &&
-      Services.prefs.getBoolPref("browser.formfill.enable", true)
+      Services.prefs.getBoolPref("browser.urlbar.suggest.history", true)
     );
   }
   getPriority(context) {
@@ -47,10 +46,14 @@ export class PersonalSiteSearchHistory extends UrlbarProvider {
       context.searchMode.engineName,
     );
     if (!engine) return;
-    const entries = await lazy.FormHistory.search(["value", "lastUsed"], {
-      fieldname: lazy.DEFAULT_FORM_HISTORY_PARAM,
-      source: engine.name,
-    });
+    // Zen disables form fill by default. Visited search URLs remain browser
+    // history, independent of form-fill storage and its separate preference.
+    const entries = Services.prefs.getBoolPref("browser.formfill.enable", false)
+      ? await lazy.FormHistory.search(["value", "lastUsed"], {
+          fieldname: lazy.DEFAULT_FORM_HISTORY_PARAM,
+          source: engine.name,
+        })
+      : [];
     const submission = engine.getSubmission(
       "zen_search_terms_marker",
       null,

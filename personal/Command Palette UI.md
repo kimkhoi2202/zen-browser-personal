@@ -17,7 +17,9 @@ on entry, without requiring a character. It uses native FormHistory plus at most
 100 search URLs for the current engine from Places, deduplicates them and returns
 at most five native search suggestions. It never reads another browser's profile
 or sends a request. Private windows and disabled history/form-fill suggestions
-do not use this provider. Native remote providers remain eligible when typing.
+do not use this provider. FormHistory is read only when form fill is enabled;
+Zen disables that by default, while visited search URLs remain available through
+the independently enabled browsing history. Native remote providers remain eligible when typing.
 There are no added timers, animations, observers or background polling.
 
 The shared input patch sets the placeholder; the controller loads its Fluent
