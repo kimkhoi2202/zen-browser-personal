@@ -26,6 +26,11 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
     # its views, timers, observers and display link are released reliably.
     SOURCES["ZenPipNativeChrome.mm"].flags += ["-fobjc-arc"]
 
+    # The system caption style (System Settings > Accessibility > Captions).
+    OS_LIBS += [
+        "-framework MediaAccessibility",
+    ]
+
     XPCOM_MANIFESTS += [
         "components.conf",
     ]

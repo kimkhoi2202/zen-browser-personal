@@ -136,6 +136,7 @@ class ZenPipNativeSession {
   #window = null;
   #wasPlayingBeforeScrub = false;
   #captionsAvailable = false;
+  #captionStyle = null;
 
   constructor(window, player, controls) {
     this.#window = window;
@@ -153,6 +154,11 @@ class ZenPipNativeSession {
 
   get controls() {
     return this.#controls;
+  }
+
+  // The system caption style last handed to the player page (for tests).
+  get captionStyle() {
+    return this.#captionStyle;
   }
 
   // State mirrored from the original video.
@@ -260,6 +266,19 @@ class ZenPipNativeSession {
         break;
       case "controls":
         this.#positionCaptions(value == 1, detail);
+        break;
+      case "caption-style":
+        // The system caption style (Accessibility > Captions), on open and
+        // whenever it changes; the player page renders captions with it.
+        try {
+          this.#captionStyle = JSON.parse(detail || "null");
+          actor.sendAsyncMessage(
+            "PictureInPicture:ZenCaptionStyle",
+            this.#captionStyle
+          );
+        } catch (e) {
+          console.error(e);
+        }
         break;
       case "placement":
         if (detail) {

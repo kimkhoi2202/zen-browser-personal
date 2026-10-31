@@ -6,6 +6,8 @@
 
 #import "ZenPipNativeChrome.h"
 
+#import <CoreText/CoreText.h>
+#import <MediaAccessibility/MediaAccessibility.h>
 #import <QuartzCore/QuartzCore.h>
 
 #include <vector>
@@ -115,6 +117,100 @@ NSString* JSONString(NSDictionary* aObject) {
                                                    error:nil];
   return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
               : @"{}";
+}
+
+// "rgba(...)" for a MediaAccessibility color (+1 reference, released here)
+// and its separate opacity setting.
+NSString* CSSColor(CGColorRef aColor, CGFloat aOpacity) {
+  NSColor* color = aColor ? [[NSColor colorWithCGColor:aColor]
+                                colorUsingColorSpace:NSColorSpace.sRGBColorSpace]
+                          : nil;
+  if (aColor) {
+    CFRelease(aColor);
+  }
+  if (!color) {
+    return @"transparent";
+  }
+  return [NSString stringWithFormat:@"rgba(%ld, %ld, %ld, %.3f)",
+                                    lround(std::clamp<CGFloat>(color.redComponent, 0, 1) * 255),
+                                    lround(std::clamp<CGFloat>(color.greenComponent, 0, 1) * 255),
+                                    lround(std::clamp<CGFloat>(color.blueComponent, 0, 1) * 255),
+                                    std::clamp<CGFloat>(color.alphaComponent * aOpacity, 0, 1)];
+}
+
+// The user's system caption style (System Settings > Accessibility >
+// Captions), as CSS-ready values, so Picture-in-Picture captions look like
+// they do in Apple's own players (which read the same MediaAccessibility
+// preferences).
+NSDictionary* SystemCaptionStyle() {
+  const MACaptionAppearanceDomain domain = kMACaptionAppearanceDomainUser;
+  NSString* text = CSSColor(MACaptionAppearanceCopyForegroundColor(domain, nullptr),
+                            MACaptionAppearanceGetForegroundOpacity(domain, nullptr));
+  CGFloat windowOpacity = MACaptionAppearanceGetWindowOpacity(domain, nullptr);
+  CGFloat backgroundOpacity = MACaptionAppearanceGetBackgroundOpacity(domain, nullptr);
+  NSString* window = CSSColor(MACaptionAppearanceCopyWindowColor(domain, nullptr), windowOpacity);
+  NSString* background =
+      CSSColor(MACaptionAppearanceCopyBackgroundColor(domain, nullptr), backgroundOpacity);
+  // One box behind the text: Apple's caption "window" when it is visible,
+  // otherwise the per-line text background.
+  NSString* box = windowOpacity > 0.01       ? window
+                  : backgroundOpacity > 0.01 ? background
+                                             : @"transparent";
+
+  NSString* family = @"system-ui";
+  double weight = 500;
+  if (CTFontDescriptorRef font = MACaptionAppearanceCopyFontDescriptorForStyle(
+          domain, nullptr, kMACaptionAppearanceFontStyleDefault)) {
+    NSString* name = CFBridgingRelease(CTFontDescriptorCopyAttribute(font, kCTFontFamilyNameAttribute));
+    if (name.length && ![name hasPrefix:@"."]) {
+      NSString* quoted = [[name stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+          stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+      family = [NSString stringWithFormat:@"\"%@\", system-ui", quoted];
+    }
+    CTFontRef ctFont = CTFontCreateWithFontDescriptor(font, 16, nullptr);
+    NSDictionary* traits = CFBridgingRelease(CTFontCopyTraits(ctFont));
+    CFRelease(ctFont);
+    CFRelease(font);
+    // CoreText weight (-1..1) to the nearest CSS weight.
+    double ct = [traits[(id)kCTFontWeightTrait] doubleValue];
+    const double ctWeights[] = {-0.8, -0.6, -0.4, 0, 0.23, 0.3, 0.4, 0.56, 0.62};
+    double best = 1e9;
+    for (int i = 0; i < 9; i++) {
+      if (std::abs(ctWeights[i] - ct) < best) {
+        best = std::abs(ctWeights[i] - ct);
+        weight = 100 * (i + 1);
+      }
+    }
+  }
+
+  NSString* shadow = @"none";
+  switch (MACaptionAppearanceGetTextEdgeStyle(domain, nullptr)) {
+    case kMACaptionAppearanceTextEdgeStyleRaised:
+      shadow = @"-0.05em -0.05em 0.08em rgba(0, 0, 0, 0.9)";
+      break;
+    case kMACaptionAppearanceTextEdgeStyleDepressed:
+      shadow = @"0.05em 0.05em 0.08em rgba(0, 0, 0, 0.9)";
+      break;
+    case kMACaptionAppearanceTextEdgeStyleUniform:
+      shadow = @"0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000";
+      break;
+    case kMACaptionAppearanceTextEdgeStyleDropShadow:
+      shadow = @"0 0.06em 0.12em rgba(0, 0, 0, 0.9)";
+      break;
+    default:
+      break;
+  }
+  return @{
+    @"color" : text,
+    @"box" : box,
+    @"radius" : @(std::clamp<CGFloat>(
+        MACaptionAppearanceGetWindowRoundedCornerRadius(domain, nullptr), 0, 24)),
+    @"font" : family,
+    @"weight" : @(weight),
+    @"shadow" : shadow,
+    @"scale" : @(std::clamp<CGFloat>(MACaptionAppearanceGetRelativeCharacterSize(domain, nullptr),
+                                     0.5, 2.0)),
+  };
 }
 
 NSString* DockName(const Dock& aDock) {
@@ -703,8 +799,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self applyAppearance];
   [self refreshAllControls];
   [self settleAnimated:NO];
+  // Before the first reveal, so captions are placed with the system style.
+  [self notifyCaptionStyle];
   [self revealControlsFor:kInitialRevealDuration];
   return self;
+}
+
+- (void)notifyCaptionStyle {
+  [self notifyHost:"caption-style" value:0 detail:JSONString(SystemCaptionStyle())];
 }
 
 - (void)dealloc {
@@ -828,6 +930,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                     usingBlock:^(NSNotification*) {
                                       [weakSelf settleAnimated:YES];
                                     }]];
+  // System Settings > Accessibility > Captions changed.
+  [mObservers
+      addObject:[nc addObserverForName:(__bridge NSString*)kMACaptionAppearanceSettingsChangedNotification
+                                object:nil
+                                 queue:nil
+                            usingBlock:^(NSNotification*) {
+                              [weakSelf notifyCaptionStyle];
+                            }]];
 
   NSNotificationCenter* wnc = NSWorkspace.sharedWorkspace.notificationCenter;
   [mWorkspaceObservers

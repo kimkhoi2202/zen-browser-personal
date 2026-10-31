@@ -1,5 +1,5 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..890092632b8927f22f1b0ec1f9c6719e59faa857 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..26222a0b4e25e4940fd7bc7841ae6d1f431263a5 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
 @@ -285,6 +285,14 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
@@ -25,7 +25,34 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..890092632b8927f22f1b0ec1f9c6719e
          PictureInPictureChild.videoIsPiPEligible(video)
        ) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
-@@ -2181,6 +2190,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -1847,8 +1856,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+     const textTracksFontScale = this.document
+       .querySelector(":root")
+       .style.getPropertyValue("--font-scale");
++    // Zen: with the native chrome, captions still make room for the timeline
++    // under Reduce Motion (the stylesheet drops the transition instead).
++    const zenCaptionStyle =
++      this.document.documentElement.hasAttribute("zen-caption-style");
+ 
+-    if (isFullscreen || isReducedMotionEnabled) {
++    if (isFullscreen || (isReducedMotionEnabled && !zenCaptionStyle)) {
+       textTracks.removeAttribute("overlap-video-controls");
+       return;
+     }
+@@ -1866,6 +1879,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         } else {
+           root.style.setProperty("--player-controls-scrubber-height", "0px");
+         }
++        // Zen: just above the native timeline, whose top edge is reported
++        // (only used once the system caption style is applied).
++        root.style.setProperty(
++          "--zen-texttracks-bottom-overlapped",
++          `${playerVideoRect.bottom - playerBottomControlsDOMRect.top + 4}px`
++        );
+         textTracks.setAttribute("overlap-video-controls", true);
+       } else {
+         textTracks.removeAttribute("overlap-video-controls");
+@@ -2181,6 +2200,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
              {
                scrubberPosition,
                timestamp,
@@ -36,7 +63,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..890092632b8927f22f1b0ec1f9c6719e
              }
            );
          }
-@@ -2291,12 +2304,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2291,12 +2314,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
          let selectedTime;
          let video = this.getWeakVideo();
          let currentTime = this.videoWrapper.getCurrentTime(video);
@@ -54,7 +81,59 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..890092632b8927f22f1b0ec1f9c6719e
            selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
          }
          this.videoWrapper.setCurrentTime(video, selectedTime);
-@@ -2652,6 +2668,16 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2326,6 +2352,10 @@ export class PictureInPictureChild extends JSWindowActorChild {
+         this.toggleTextTracks();
+         break;
+       }
++      case "PictureInPicture:ZenCaptionStyle": {
++        this.zenApplyCaptionStyle(message.data);
++        break;
++      }
+       case "PictureInPicture:ChangeFontSizeTextTracks": {
+         this.setTextTrackFontSize();
+         break;
+@@ -2409,6 +2439,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
+    * Set the font size on the PiP window using the current font size value from
+    * the "media.videocontrols.picture-in-picture.display-text-tracks.size" pref
+    */
++  /**
++   * Zen: renders captions in the system caption style (System Settings >
++   * Accessibility > Captions), as Apple's own players do. The native chrome
++   * reads it through MediaAccessibility and sends CSS-ready values; null
++   * restores the stock look.
++   *
++   * @param {object|null} style
++   */
++  zenApplyCaptionStyle(style) {
++    const root = this.document?.documentElement;
++    if (!root) {
++      return;
++    }
++    if (!style) {
++      root.removeAttribute("zen-caption-style");
++      return;
++    }
++    const properties = {
++      "--zen-cue-color": style.color,
++      "--zen-cue-box": style.box,
++      "--zen-cue-radius": `${Number(style.radius) || 0}px`,
++      "--zen-cue-font": style.font,
++      "--zen-cue-weight": String(Number(style.weight) || 500),
++      "--zen-cue-shadow": style.shadow,
++      "--zen-cue-scale": String(Number(style.scale) || 1),
++    };
++    for (const [name, value] of Object.entries(properties)) {
++      if (typeof value == "string") {
++        root.style.setProperty(name, value);
++      }
++    }
++    root.setAttribute("zen-caption-style", "");
++  }
++
+   setTextTrackFontSize() {
+     const fontSize = Services.prefs.getStringPref(
+       TEXT_TRACK_FONT_SIZE,
+@@ -2652,6 +2716,16 @@ export class PictureInPictureChild extends JSWindowActorChild {
        },
        { once: true }
      );

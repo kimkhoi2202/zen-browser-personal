@@ -32,7 +32,10 @@ Patches to upstream files (in `src/`):
   fixes (drop requests the user already came back from, close a player that
   finished opening after the user returned, one automatic player at a time).
 - `toolkit/actors/PictureInPictureChild-sys-mjs.patch` – seek amount parameter
-  and numeric time/duration/live alongside the formatted timestamp.
+  and numeric time/duration/live alongside the formatted timestamp; applies the
+  system caption style and places captions just above the native timeline.
+- `toolkit/themes/shared/pictureinpicture/texttracks-css.patch` – caption box
+  styled from the system caption style (only when it has been applied).
 - `toolkit/themes/.../player-css.patch` – hides the HTML controls in native mode.
 - `widget/cocoa/nsCocoaWindow-mm.patch` – `mainChildView` finds Gecko's
   `ChildView` instead of assuming it is the last content subview (the overlay
@@ -53,6 +56,18 @@ desktop, not video, so it is always Regular. The system Liquid Glass setting
 Layout: window controls on the left — close, back to tab, minimize — and
 playback options on the right — speed, captions, sound. Creation order (which
 VoiceOver follows) and the Tab order match that reading order.
+
+## Captions
+
+Captions use the system caption style (System Settings > Accessibility >
+Captions), read through the public MediaAccessibility API, the same
+preferences Apple's own players and Safari follow: font (SF Pro by default),
+text color and opacity, the caption box color, opacity and corner radius,
+text edge style and relative size. The chrome sends it as CSS-ready values
+when the player opens and whenever the setting changes; the player page
+renders WebVTT and site captions (YouTube etc.) with it and keeps them just
+above the timeline while the controls show. Apple's per-line text
+background is drawn as the caption box when the box itself is transparent.
 
 ## Displays
 
