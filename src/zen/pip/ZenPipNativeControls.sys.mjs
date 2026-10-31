@@ -106,6 +106,8 @@ const LABELS = [
   ["timeline", "zen-pip-timeline"],
   ["timeOf", "zen-pip-time-of"],
   ["live", "zen-pip-live"],
+  ["goLive", "zen-pip-go-live"],
+  ["behindLive", "zen-pip-behind-live"],
   ["restore", "zen-pip-restore"],
 ];
 
@@ -175,8 +177,20 @@ class ZenPipNativeSession {
     this.#controls?.setPlaybackRate(rate);
   }
 
-  setTimeline({ currentTime, duration, isLive }) {
+  setTimeline({ currentTime, duration, isLive, liveWindow }) {
     if (typeof currentTime != "number") {
+      return;
+    }
+    if (isLive && liveWindow) {
+      // A live stream that can be scrubbed: the timeline spans its seekable
+      // window, and the Live button returns to the live edge.
+      this.#controls?.setTimeline(
+        currentTime - liveWindow.start,
+        liveWindow.end - liveWindow.start,
+        true,
+        true
+      );
+      this.#controls?.setLiveEdge(!!liveWindow.atLiveEdge);
       return;
     }
     const seekable = Number.isFinite(duration) && duration > 0 && !isLive;
@@ -245,6 +259,9 @@ class ZenPipNativeSession {
         break;
       case "toggle-mute":
         player.toggleMute();
+        break;
+      case "go-live":
+        actor.sendAsyncMessage("PictureInPicture:ZenGoLive");
         break;
       case "set-rate":
         player.requestPlaybackRate(value);

@@ -8,10 +8,11 @@
 // against the real WindowServer and real displays. Build with build.sh.
 //
 //   ZenPipChromeHarness <video> visual [screenIndex] [width height]
-//   ZenPipChromeHarness <video> layout
+//   ZenPipChromeHarness <video> layout [fast]
 //   ZenPipChromeHarness <video> motion
 //
-// "motion" exits non-zero if any check fails. Video playback is muted.
+// "layout" (on-demand, live and live DVR timelines) and "motion" exit
+// non-zero if any check fails. Video playback is muted.
 
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
@@ -67,6 +68,9 @@ class HarnessHost final : public ChromeHost {
     } else if (action == "toggle-captions") {
       captions = !captions;
       [chrome setCaptionsAvailable:YES enabled:captions];
+    } else if (action == "go-live") {
+      [player seekToTime:CMTimeMakeWithSeconds(177, 600)];
+      [chrome setAtLiveEdge:YES];
     }
   }
 };
@@ -163,14 +167,27 @@ int main(int argc, char** argv) {
     [chrome setCurrentTime:95 duration:180 seekable:YES live:NO];
     [panel orderFrontRegardless];
 
-    // Keep the timeline in step with the AVPlayer like timeupdate would.
+    // Keep the timeline in step with the AVPlayer like timeupdate would. The
+    // layout mode also simulates the two kinds of live stream the bridge
+    // reports: without DVR (no duration, not seekable) and with a DVR window
+    // (here the whole video, with the live edge at its end).
+    enum class Timeline { OnDemand, Live, LiveDVR };
+    __block Timeline timeline = Timeline::OnDemand;
     [NSTimer scheduledTimerWithTimeInterval:0.25
                                     repeats:YES
                                       block:^(NSTimer*) {
-                                        [chrome setCurrentTime:CMTimeGetSeconds(player.currentTime)
-                                                      duration:180
-                                                      seekable:YES
-                                                          live:NO];
+                                        double t = CMTimeGetSeconds(player.currentTime);
+                                        if (timeline == Timeline::Live) {
+                                          [chrome setCurrentTime:t
+                                                        duration:INFINITY
+                                                        seekable:NO
+                                                            live:YES];
+                                        } else {
+                                          [chrome setCurrentTime:t
+                                                        duration:180
+                                                        seekable:YES
+                                                            live:timeline == Timeline::LiveDVR];
+                                        }
                                       }];
 
     int failures = 0;
@@ -197,58 +214,135 @@ int main(int argc, char** argv) {
       Spin(argc > 6 ? atof(argv[6]) : 4);
     } else if ([mode isEqualToString:@"layout"]) {
       [chrome revealControlsSticky:YES];
-      for (NSValue* sizeValue in @[ [NSValue valueWithSize:NSMakeSize(200, 112.5)],
-                                    [NSValue valueWithSize:NSMakeSize(260, 146.25)],
-                                    [NSValue valueWithSize:NSMakeSize(320, 180)],
-                                    [NSValue valueWithSize:NSMakeSize(480, 270)],
-                                    [NSValue valueWithSize:NSMakeSize(720, 405)] ]) {
-        NSSize s = sizeValue.sizeValue;
-        NSRect f = panel.frame;
-        [panel setFrame:NSMakeRect(NSMaxX(f) - s.width, NSMinY(f), s.width, s.height)
-                display:YES];
-        Spin(0.6);
-        NSDictionary* state = [chrome debugState];
-        NSMutableArray* visible = [NSMutableArray array];
-        std::vector<std::pair<NSString*, NSRect>> shown;
-        for (NSDictionary* c in state[@"controls"]) {
-          if (![c[@"hidden"] boolValue]) {
-            [visible addObject:c[@"name"]];
-            NSArray* fr = c[@"frame"];
-            CGFloat d = MIN([fr[2] doubleValue], [fr[3] doubleValue]);
-            check(d >= 24, [NSString stringWithFormat:@"%gx%g %@ hit target %.0fpt >= 24",
-                                                     s.width, s.height, c[@"name"], d]);
-            shown.push_back({c[@"name"], NSMakeRect([fr[0] doubleValue], [fr[1] doubleValue],
-                                                    [fr[2] doubleValue], [fr[3] doubleValue])});
+      auto frameOf = [](NSArray* fr) {
+        return NSMakeRect([fr[0] doubleValue], [fr[1] doubleValue], [fr[2] doubleValue],
+                          [fr[3] doubleValue]);
+      };
+      auto controlNamed = [](NSDictionary* aState, NSString* aName) -> NSDictionary* {
+        for (NSDictionary* c in aState[@"controls"]) {
+          if ([c[@"name"] isEqualToString:aName]) {
+            return c;
           }
         }
-        bool overlap = false;
-        for (size_t i = 0; i < shown.size(); i++) {
-          for (size_t j = i + 1; j < shown.size(); j++) {
-            if (NSIntersectsRect(shown[i].second, shown[j].second)) {
-              overlap = true;
-              Print([NSString stringWithFormat:@"  overlap: %@ / %@", shown[i].first,
-                                               shown[j].first]);
+        return nil;
+      };
+      for (Timeline kind : {Timeline::OnDemand, Timeline::Live, Timeline::LiveDVR}) {
+        timeline = kind;
+        NSString* label = kind == Timeline::OnDemand ? @""
+                          : kind == Timeline::Live   ? @"live "
+                                                     : @"live DVR ";
+        [chrome setAtLiveEdge:YES];
+        for (NSValue* sizeValue in @[ [NSValue valueWithSize:NSMakeSize(200, 112.5)],
+                                      [NSValue valueWithSize:NSMakeSize(260, 146.25)],
+                                      [NSValue valueWithSize:NSMakeSize(320, 180)],
+                                      [NSValue valueWithSize:NSMakeSize(480, 270)],
+                                      [NSValue valueWithSize:NSMakeSize(720, 405)] ]) {
+          NSSize s = sizeValue.sizeValue;
+          NSRect f = panel.frame;
+          [panel setFrame:NSMakeRect(NSMaxX(f) - s.width, NSMinY(f), s.width, s.height)
+                  display:YES];
+          Spin(0.6);
+          NSDictionary* state = [chrome debugState];
+          NSString* where = [NSString stringWithFormat:@"%@%gx%g", label, s.width, s.height];
+          NSMutableArray* visible = [NSMutableArray array];
+          std::vector<std::pair<NSString*, NSRect>> shown;
+          for (NSDictionary* c in state[@"controls"]) {
+            if (![c[@"hidden"] boolValue]) {
+              [visible addObject:c[@"name"]];
+              NSRect fr = frameOf(c[@"frame"]);
+              // A status badge isn't a hit target.
+              if (![c[@"statusOnly"] boolValue]) {
+                CGFloat d = MIN(fr.size.width, fr.size.height);
+                check(d >= 24, [NSString stringWithFormat:@"%@ %@ hit target %.0fpt >= 24",
+                                                         where, c[@"name"], d]);
+              }
+              shown.push_back({c[@"name"], fr});
             }
           }
+          BOOL timelineShown = ![state[@"timeline"][@"hidden"] boolValue];
+          if (timelineShown) {
+            [visible addObject:@"timeline"];
+            shown.push_back({@"timeline", frameOf(state[@"timeline"][@"frame"])});
+          }
+          bool overlap = false;
+          for (size_t i = 0; i < shown.size(); i++) {
+            for (size_t j = i + 1; j < shown.size(); j++) {
+              if (NSIntersectsRect(shown[i].second, shown[j].second)) {
+                overlap = true;
+                Print([NSString stringWithFormat:@"  overlap: %@ / %@", shown[i].first,
+                                                 shown[j].first]);
+              }
+            }
+          }
+          check(!overlap,
+                [NSString stringWithFormat:@"%@ no two visible controls overlap", where]);
+          NSDictionary* live = controlNamed(state, @"live");
+          BOOL liveShown = live && ![live[@"hidden"] boolValue];
+          if (kind == Timeline::OnDemand) {
+            check(!liveShown && timelineShown,
+                  [NSString stringWithFormat:@"%@ timeline without a Live badge", where]);
+          } else if (kind == Timeline::Live) {
+            check(liveShown && [live[@"statusOnly"] boolValue] && !timelineShown &&
+                      [state[@"liveDotRed"] boolValue] &&
+                      [controlNamed(state, @"back15")[@"hidden"] boolValue],
+                  [NSString stringWithFormat:@"%@ red Live status badge only, no timeline "
+                                             @"or skip buttons",
+                                             where]);
+          } else {
+            check(liveShown && ![live[@"statusOnly"] boolValue] && timelineShown &&
+                      NSMinX(frameOf(state[@"timeline"][@"frame"])) >=
+                          NSMaxX(frameOf(live[@"frame"])) &&
+                      ![state[@"timeline"][@"labelsShown"] boolValue],
+                  [NSString stringWithFormat:@"%@ Live button left of a timeline without times",
+                                             where]);
+          }
+          Print([NSString stringWithFormat:@"LAYOUT %@ WINDOW %ld visible=%@", where,
+                                           (long)panel.windowNumber,
+                                           [visible componentsJoinedByString:@","]]);
+          // ZEN_PIP_HARNESS_CAPTURE=<prefix> saves <prefix>-[live-|live-dvr-]<W>x<H>.png.
+          if (const char* prefix = getenv("ZEN_PIP_HARNESS_CAPTURE")) {
+            NSString* kindName = kind == Timeline::OnDemand ? @""
+                                 : kind == Timeline::Live   ? @"live-"
+                                                            : @"live-dvr-";
+            NSString* path = [NSString
+                stringWithFormat:@"%s-%@%gx%g.png", prefix, kindName, s.width, s.height];
+            NSTask* task = [NSTask
+                launchedTaskWithLaunchPath:@"/usr/sbin/screencapture"
+                                 arguments:@[ @"-x", @"-o",
+                                              [NSString stringWithFormat:@"-l%ld",
+                                                                         (long)panel.windowNumber],
+                                              path ]];
+            [task waitUntilExit];
+          }
+          Spin(argc > 3 ? 0 : 1.5);
         }
-        check(!overlap, [NSString stringWithFormat:@"%gx%g no two visible controls overlap",
-                                                  s.width, s.height]);
-        Print([NSString stringWithFormat:@"LAYOUT %gx%g WINDOW %ld visible=%@", s.width,
-                                         s.height, (long)panel.windowNumber,
-                                         [visible componentsJoinedByString:@","]]);
-        // ZEN_PIP_HARNESS_CAPTURE=<prefix> saves <prefix>-<W>x<H>.png per size.
-        if (const char* prefix = getenv("ZEN_PIP_HARNESS_CAPTURE")) {
-          NSString* path = [NSString stringWithFormat:@"%s-%gx%g.png", prefix, s.width, s.height];
-          NSTask* task = [NSTask
-              launchedTaskWithLaunchPath:@"/usr/sbin/screencapture"
-                               arguments:@[ @"-x", @"-o",
-                                            [NSString stringWithFormat:@"-l%ld",
-                                                                       (long)panel.windowNumber],
-                                            path ]];
-          [task waitUntilExit];
+        // The badge acts only when the stream can be scrubbed: behind the live
+        // edge its dot turns grey and a click returns to the edge.
+        size_t before = host.log.size();
+        if (kind == Timeline::Live) {
+          check(![chrome testClickControl:@"live"] && host.log.size() == before,
+                @"live: the status badge can't be clicked");
+        } else if (kind == Timeline::LiveDVR) {
+          [chrome setAtLiveEdge:NO];
+          Spin(0.1);
+          NSDictionary* behind = [chrome debugState];
+          check(![behind[@"liveDotRed"] boolValue] &&
+                    [behind[@"timeline"][@"accessibilityValue"] hasSuffix:@"behind live"],
+                [NSString stringWithFormat:@"live DVR: behind the live edge the dot is grey "
+                                           @"(VoiceOver: %@)",
+                                           behind[@"timeline"][@"accessibilityValue"]]);
+          check([chrome testClickControl:@"live"] && host.log.size() > before &&
+                    host.log.back() == "go-live",
+                @"live DVR: the Live button asks for the live edge");
+          Spin(0.1);
+          NSDictionary* edge = [chrome debugState];
+          check([edge[@"liveDotRed"] boolValue] &&
+                    [edge[@"timeline"][@"accessibilityValue"] isEqualToString:@"Live"],
+                @"live DVR: back at the live edge the dot is red (VoiceOver: Live)");
         }
-        Spin(argc > 3 ? 0 : 1.5);
       }
+      timeline = Timeline::OnDemand;
+      Print([NSString stringWithFormat:@"SUMMARY %d failure(s)", failures]);
     } else if ([mode isEqualToString:@"motion"]) {
       struct Throw {
         const char* name;

@@ -32,8 +32,12 @@ Patches to upstream files (in `src/`):
   fixes (drop requests the user already came back from, close a player that
   finished opening after the user returned, one automatic player at a time).
 - `toolkit/actors/PictureInPictureChild-sys-mjs.patch` – seek amount parameter
-  and numeric time/duration/live alongside the formatted timestamp; applies the
-  system caption style and places captions just above the native timeline.
+  and numeric time/duration/live alongside the formatted timestamp; live
+  streams' seekable window, its timeline updates and Go to live (see Live
+  streams); applies the system caption style and places captions just above
+  the native timeline.
+- `browser/extensions/pictureinpicture/video-wrappers/youtube-js.patch` –
+  YouTube's live window and live edge from its own player.
 - `toolkit/themes/shared/pictureinpicture/texttracks-css.patch` – caption box
   styled from the system caption style (only when it has been applied).
 - `toolkit/themes/.../player-css.patch` – hides the HTML controls in native mode.
@@ -59,6 +63,32 @@ no adaptive behaviors and looks the same at any setting (measured in
 Layout: window controls on the left — close, back to tab, minimize — and
 playback options on the right — speed, captions, sound. Creation order (which
 VoiceOver follows) and the Tab order match that reading order.
+
+## Live streams
+
+A live stream shows a glass **Live** badge with a dot at the bottom left,
+following YouTube's own live indicator.
+
+- A stream that can't be scrubbed (no DVR window, such as Claude FM on
+  YouTube) shows only the badge: a red dot, no timeline and no skip buttons.
+  The badge is status, not a control: it ignores clicks, takes no keyboard
+  focus, has non-interactive glass and reads as static text "Live" in
+  VoiceOver.
+- A stream with a DVR window (most news channels) keeps the timeline beside
+  the badge. The timeline spans the seekable window, so it can go to any
+  point the site allows, and ±15 s works. The badge becomes a **Go to live**
+  button; its dot is red at the live edge and grey behind it, and a click
+  returns to the edge.
+
+The window comes from the site wrapper's `getLiveWindow()` and the edge jump
+from `goToLiveEdge()`. YouTube reports a placeholder `video.seekable` for live
+streams, so its wrapper reads the player's own progress state
+(`allowSeeking`, `seekableStart/End` minus `offset`, `isAtLiveHead`) and uses
+`seekToLiveHead()`. Elsewhere the fallback trusts `video.seekable` for windows
+of one minute to two days, treats the last 20 s as the live edge and jumps to
+3 s before the end. Live streams have no formatted timestamp, so the child
+sends `PictureInPicture:ZenLiveTimeline` on `timeupdate` and once a second
+while paused (a paused stream falls behind the edge without events).
 
 ## Captions
 
@@ -109,4 +139,5 @@ Off macOS the component is not registered and the stock player is unchanged.
 - `tests/geometry/ZenPipGeometryTests.cpp` – standalone unit tests (see header).
 - `tests/harness/` – builds the chrome without Gecko over an AVPlayer video in a
   real floating panel, for screenshots and real-WindowServer motion checks on
-  the attached displays (`build.sh`, then `ZenPipChromeHarness <video> motion`).
+  the attached displays (`build.sh`, then `ZenPipChromeHarness <video> motion`;
+  `layout` checks every size with an on-demand, live and live DVR timeline).

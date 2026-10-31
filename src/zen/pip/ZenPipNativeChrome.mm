@@ -237,6 +237,20 @@ NSString* DockName(const Dock& aDock) {
   return h.length ? h : v;
 }
 
+// The Live badge's dot, followed by `aGap` points of space before the label.
+NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
+  NSImage* image = [NSImage imageWithSize:NSMakeSize(aDiameter + aGap, aDiameter)
+                                  flipped:NO
+                           drawingHandler:^BOOL(NSRect) {
+                             [aColor setFill];
+                             [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(0, 0, aDiameter,
+                                                                                aDiameter)] fill];
+                             return YES;
+                           }];
+  [image setTemplate:NO];  // keeps its color inside the white-tinted button
+  return image;
+}
+
 }  // namespace
 
 #pragma mark - Controls
@@ -253,7 +267,7 @@ NSString* DockName(const Dock& aDock) {
   return YES;
 }
 - (BOOL)canBecomeKeyView {
-  return self.isEnabled && !self.isHiddenOrHasHiddenAncestor;
+  return self.isEnabled && !self.refusesFirstResponder && !self.isHiddenOrHasHiddenAncestor;
 }
 - (BOOL)mouseDownCanMoveWindow {
   return NO;
@@ -315,6 +329,9 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
 @property(nonatomic, readonly) ZenPipButtonCore* button;
 @property(nonatomic, readonly) NSView* material;
 @property(nonatomic) BOOL capsule;
+// Shows information only (a status badge): not focusable, announced as text,
+// and clicks or drags on it go to the player like on the video.
+@property(nonatomic) BOOL statusOnly;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
 - (void)setClearGlass:(BOOL)aClear;
 @end
@@ -363,6 +380,24 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
 
 - (void)setClearGlass:(BOOL)aClear {
   ApplyGlass(_material, aClear);
+}
+
+- (void)setStatusOnly:(BOOL)aStatusOnly {
+  if (aStatusOnly == _statusOnly) {
+    return;
+  }
+  _statusOnly = aStatusOnly;
+  _button.refusesFirstResponder = aStatusOnly;
+  _button.accessibilityRole = aStatusOnly ? NSAccessibilityStaticTextRole : NSAccessibilityButtonRole;
+  if (@available(macOS 27.0, *)) {
+    if ([_material respondsToSelector:@selector(setEffectIsInteractive:)]) {
+      ((NSGlassEffectView*)_material).effectIsInteractive = !aStatusOnly;
+    }
+  }
+}
+
+- (NSView*)hitTest:(NSPoint)aPoint {
+  return _statusOnly ? nil : [super hitTest:aPoint];
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -709,6 +744,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   ZenPipGlassControl* mBack;
   ZenPipGlassControl* mPlay;
   ZenPipGlassControl* mForward;
+  // "● Live" for live streams: a status badge, or a "go to live" button beside
+  // the timeline when the stream can be scrubbed.
+  ZenPipGlassControl* mLiveBadge;
   ZenPipTimeline* mTimeline;
   ZenPipTuckPanel* mTuckPanel;
 
@@ -720,6 +758,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   double mDuration;
   BOOL mSeekable;
   BOOL mLive;
+  // A scrubbable live stream is playing at its live edge (red dot).
+  BOOL mAtLiveEdge;
+  BOOL mLiveDotRed;  // as last drawn
   BOOL mCaptionsAvailable;
   BOOL mCaptionsEnabled;
   NSString* mCaptionSize;
@@ -786,6 +827,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mHost = aHost;
   mWindow = aWindow;
   mRate = 1;
+  mAtLiveEdge = YES;
   mDuration = NAN;
   mAspect = aWindow.frame.size.height > 0
                 ? aWindow.frame.size.width / aWindow.frame.size.height
@@ -887,6 +929,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mBack = [self addControl:@selector(onBack:)];
   mPlay = [self addControl:@selector(onPlay:)];
   mForward = [self addControl:@selector(onForward:)];
+  mLiveBadge = [self addControl:@selector(onLive:)];
+  mLiveBadge.capsule = YES;
+  mLiveBadge.hidden = YES;
+  mLiveBadge.button.imageHugsTitle = YES;
   mTimeline = [[ZenPipTimeline alloc] initWithTarget:self action:@selector(onScrub:)];
   [mControls addSubview:mTimeline];
 
@@ -899,7 +945,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSArray<NSView*>* order = @[
     mClose.button, mReturn.button, mMinimize.button, mSpeed.button,
     mCaptions.button, mSound.button, mBack.button, mPlay.button,
-    mForward.button, mTimeline.slider
+    mForward.button, mLiveBadge.button, mTimeline.slider
   ];
   for (NSUInteger i = 0; i < order.count; i++) {
     order[i].nextKeyView = order[(i + 1) % order.count];
@@ -1008,7 +1054,17 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (NSArray<ZenPipGlassControl*>*)allGlassControls {
   return @[ mClose, mMinimize, mSpeed, mCaptions, mSound, mReturn, mBack, mPlay,
-            mForward ];
+            mForward, mLiveBadge ];
+}
+
+// Names used by debugState, focusedControlName and the test hooks.
+- (NSDictionary<NSString*, ZenPipGlassControl*>*)namedControls {
+  return @{
+    @"close" : mClose, @"minimize" : mMinimize, @"speed" : mSpeed,
+    @"captions" : mCaptions, @"sound" : mSound, @"return" : mReturn,
+    @"back15" : mBack, @"playPause" : mPlay, @"forward15" : mForward,
+    @"live" : mLiveBadge
+  };
 }
 
 #pragma mark Host
@@ -1069,6 +1125,15 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (layoutChange) {
     mOverlay.needsLayout = YES;
   }
+}
+
+- (void)setAtLiveEdge:(BOOL)aAtLiveEdge {
+  if (aAtLiveEdge == mAtLiveEdge) {
+    return;
+  }
+  mAtLiveEdge = aAtLiveEdge;
+  [self refreshLiveBadge];
+  [self refreshTimeline];
 }
 
 - (void)setCaptionsAvailable:(BOOL)aAvailable enabled:(BOOL)aEnabled {
@@ -1169,6 +1234,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 #pragma mark Control refresh
 
 - (void)refreshAllControls {
+  [self refreshLiveBadge];
   [self refreshPlayButton];
   [self refreshSoundButton];
   [self refreshSpeedButton];
@@ -1276,17 +1342,55 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     mTimeline.elapsed.stringValue = FormatTime(shownTime);
     mTimeline.duration.stringValue = FormatTime(mDuration);
     mTimeline.slider.hidden = NO;
-    NSString* of = [self string:@"timeOf" fallback:@"of"];
     mTimeline.slider.accessibilityLabel = [self string:@"timeline" fallback:@"Playback position"];
-    mTimeline.slider.accessibilityValueDescription =
-        [NSString stringWithFormat:@"%@ %@ %@", FormatTime(shownTime), of,
-                                   FormatTime(mDuration)];
+    if (mLive) {
+      // A DVR window: like YouTube, no times on screen (the window's start is
+      // arbitrary); VoiceOver hears how far behind live the position is.
+      mTimeline.slider.accessibilityValueDescription =
+          mAtLiveEdge && !mScrubbing
+              ? [self string:@"live" fallback:@"Live"]
+              : [NSString stringWithFormat:@"%@ %@", FormatTime(std::max(0.0, mDuration - shownTime)),
+                                           [self string:@"behindLive" fallback:@"behind live"]];
+    } else {
+      NSString* of = [self string:@"timeOf" fallback:@"of"];
+      mTimeline.slider.accessibilityValueDescription =
+          [NSString stringWithFormat:@"%@ %@ %@", FormatTime(shownTime), of,
+                                     FormatTime(mDuration)];
+    }
   } else {
     mTimeline.slider.hidden = YES;
     mTimeline.elapsed.stringValue =
         mLive ? [self string:@"live" fallback:@"Live"] : FormatTime(mCurrentTime);
     mTimeline.duration.stringValue = @"";
   }
+}
+
+// The Live badge follows YouTube's live button: red dot at the live edge,
+// grey when behind; it only acts as a button when the stream can be scrubbed.
+- (void)refreshLiveBadge {
+  BOOL scrubbable = mLive && mSeekable && std::isfinite(mDuration) && mDuration > 0;
+  BOOL atEdge = !scrubbable || mAtLiveEdge;
+  mLiveDotRed = atEdge;
+  CGFloat point = std::max<CGFloat>(12.5 * [self symbolScale], 11);
+  NSFont* font = [NSFont systemFontOfSize:point
+                                   weight:mAppearance.increaseContrast ? NSFontWeightBold
+                                                                       : NSFontWeightSemibold];
+  NSString* live = [self string:@"live" fallback:@"Live"];
+  NSString* goLive = [self string:@"goLive" fallback:@"Go to live"];
+  mLiveBadge.button.image =
+      LiveDotImage(atEdge ? NSColor.systemRedColor : [NSColor colorWithWhite:1 alpha:0.5],
+                   round(point * 0.56), round(point * 0.4));
+  mLiveBadge.button.imagePosition = NSImageLeft;
+  mLiveBadge.button.attributedTitle = [[NSAttributedString alloc]
+      initWithString:live
+          attributes:@{
+            NSFontAttributeName : font,
+            NSForegroundColorAttributeName : NSColor.whiteColor
+          }];
+  mLiveBadge.statusOnly = !scrubbable;
+  mLiveBadge.button.accessibilityLabel = scrubbable ? goLive : live;
+  mLiveBadge.button.accessibilityValueDescription = scrubbable && atEdge ? live : nil;
+  mLiveBadge.button.toolTip = scrubbable ? goLive : nil;
 }
 
 #pragma mark Layout
@@ -1301,14 +1405,30 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   CGFloat playD = std::max<CGFloat>(40, round(56 * s));
   CGFloat skipD = std::max<CGFloat>(30, round(42 * s));
   CGFloat centerGap = round(30 * s);
-  CGFloat timelineH = std::max<CGFloat>(H < 150 ? 22 : 26, round(32 * s));
-
   BOOL seekable = mSeekable && std::isfinite(mDuration) && mDuration > 0;
+  CGFloat timelineH = std::max<CGFloat>(H < 150 ? 22 : 26, round(32 * s));
+  if (mLive && seekable) {
+    timelineH = std::max<CGFloat>(timelineH, 24);  // the Live badge is a button
+  }
   BOOL showSkip = seekable && W >= 250 && H >= 150;
   BOOL showSpeed = W >= 300;
   BOOL showCaptions = W >= 270;
   BOOL showMinimize = W >= 230;
-  BOOL showLabels = W >= 290 || !seekable;
+
+  // Bottom row. A live stream shows its Live badge at the left; the timeline
+  // follows only when the stream can be scrubbed.
+  CGFloat rowX = inset;
+  mLiveBadge.hidden = !mLive;
+  if (mLive) {
+    [self refreshLiveBadge];
+    CGFloat contentW = mLiveBadge.button.image.size.width +
+                       mLiveBadge.button.attributedTitle.size.width;
+    mLiveBadge.frame =
+        NSMakeRect(inset, inset, ceil(contentW) + round(24 * s), timelineH);
+    rowX = NSMaxX(mLiveBadge.frame) + spacing;
+  }
+  BOOL showTimeline = mLive ? seekable : (seekable || std::isfinite(mDuration));
+  BOOL showLabels = !mLive && (W >= 290 || !seekable);
 
   CGFloat topY = H - inset - topD;
   mClose.frame = NSMakeRect(inset, topY, topD, topD);
@@ -1335,7 +1455,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
   // Center the transport row in the space between the top row and the
   // timeline so small players never overlap them.
-  CGFloat cy = seekable ? round((inset + timelineH + topY) / 2) : round(H / 2);
+  CGFloat cy = seekable || mLive ? round((inset + timelineH + topY) / 2) : round(H / 2);
   mPlay.frame = NSMakeRect(round(W / 2 - playD / 2), round(cy - playD / 2), playD, playD);
   mBack.hidden = !showSkip;
   mForward.hidden = !showSkip;
@@ -1346,8 +1466,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
   mTimeline.fontSize = std::max<CGFloat>(10.5, round(12 * s * 2) / 2);
   mTimeline.showsLabels = showLabels;
-  mTimeline.frame = NSMakeRect(inset, inset, W - 2 * inset, timelineH);
-  mTimeline.hidden = !seekable && !mLive && !std::isfinite(mDuration);
+  mTimeline.frame = NSMakeRect(rowX, inset, W - inset - rowX, timelineH);
+  mTimeline.hidden = !showTimeline;
 
   // Symbols are sized for the current scale.
   [self refreshPlayButton];
@@ -1364,7 +1484,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (CGFloat)timelineTopFromWindowTop {
-  return mOverlay.bounds.size.height - NSMaxY(mTimeline.frame) - 6;
+  CGFloat top = mTimeline.isHidden ? 0 : NSMaxY(mTimeline.frame);
+  if (!mLiveBadge.isHidden) {
+    top = std::max(top, NSMaxY(mLiveBadge.frame));
+  }
+  return mOverlay.bounds.size.height - (top > 0 ? top : NSMaxY(mTimeline.frame)) - 6;
 }
 
 #pragma mark Controls visibility
@@ -1521,6 +1645,13 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 - (void)onForward:(id)aSender {
   [self notifyHost:"seek-relative" value:15 detail:nil];
+  [self noteActivity];
+}
+- (void)onLive:(id)aSender {
+  if (mLiveBadge.statusOnly) {
+    return;
+  }
+  [self notifyHost:"go-live" value:0 detail:nil];
   [self noteActivity];
 }
 - (void)onSound:(id)aSender {
@@ -2375,11 +2506,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return @[ @(r.origin.x), @(r.origin.y), @(r.size.width), @(r.size.height) ];
   };
   NSMutableArray* controls = [NSMutableArray array];
-  NSDictionary* names = @{
-    @"close" : mClose, @"minimize" : mMinimize, @"speed" : mSpeed,
-    @"captions" : mCaptions, @"sound" : mSound, @"return" : mReturn,
-    @"back15" : mBack, @"playPause" : mPlay, @"forward15" : mForward
-  };
+  NSDictionary<NSString*, ZenPipGlassControl*>* names = [self namedControls];
   for (NSString* name in names) {
     ZenPipGlassControl* c = names[name];
     [controls addObject:@{
@@ -2392,6 +2519,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"accessibilityLabel" : c.button.accessibilityLabel ?: @"",
       @"symbol" : c.button.image.accessibilityDescription ?: c.button.title ?: @"",
       @"interactiveGlass" : @([self glassIsInteractive:c.material]),
+      @"statusOnly" : @(c.statusOnly),
     }];
   }
   NSScreen* screen = [self sourceScreen];
@@ -2427,6 +2555,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"elapsed" : mTimeline.elapsed.stringValue ?: @"",
       @"duration" : mTimeline.duration.stringValue ?: @"",
       @"position" : @(mTimeline.slider.doubleValue),
+      @"frame" : rect(mTimeline.frame),
+      @"labelsShown" : @(mTimeline.showsLabels),
+      @"accessibilityValue" : mTimeline.slider.accessibilityValueDescription ?: @"",
     },
     @"state" : @{
       @"playing" : @(mPlaying),
@@ -2434,7 +2565,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"rate" : @(mRate),
       @"captionsAvailable" : @(mCaptionsAvailable),
       @"captionsEnabled" : @(mCaptionsEnabled),
+      @"live" : @(mLive),
+      @"seekable" : @(mSeekable),
+      @"atLiveEdge" : @(mAtLiveEdge),
     },
+    @"liveDotRed" : @(mLiveDotRed),
     @"accessibility" : @{
       @"reduceMotion" : @(mAppearance.reduceMotion),
       @"reduceTransparency" : @(mAppearance.reduceTransparency),
@@ -2456,11 +2591,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (responder == mTimeline.slider) {
     return @"timeline";
   }
-  NSDictionary* names = @{
-    @"close" : mClose, @"minimize" : mMinimize, @"speed" : mSpeed,
-    @"captions" : mCaptions, @"sound" : mSound, @"return" : mReturn,
-    @"back15" : mBack, @"playPause" : mPlay, @"forward15" : mForward
-  };
+  NSDictionary<NSString*, ZenPipGlassControl*>* names = [self namedControls];
   for (NSString* name in names) {
     if (responder == ((ZenPipGlassControl*)names[name]).button) {
       return name;
@@ -2615,11 +2746,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (BOOL)testClickControl:(NSString*)aName {
-  NSDictionary* names = @{
-    @"close" : mClose, @"minimize" : mMinimize, @"speed" : mSpeed,
-    @"captions" : mCaptions, @"sound" : mSound, @"return" : mReturn,
-    @"back15" : mBack, @"playPause" : mPlay, @"forward15" : mForward
-  };
+  NSDictionary<NSString*, ZenPipGlassControl*>* names = [self namedControls];
   ZenPipGlassControl* control = names[aName];
   if ([aName hasPrefix:@"timeline:"]) {
     // Moves the real NSSlider and fires its action, like a keyboard or
@@ -2640,7 +2767,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     [mTuckPanel.control.button performClick:nil];
     return YES;
   }
-  if (!control || control.isHidden || !control.button.isEnabled) {
+  if (!control || control.isHidden || !control.button.isEnabled || control.statusOnly) {
     return NO;
   }
   if (control == mSpeed) {

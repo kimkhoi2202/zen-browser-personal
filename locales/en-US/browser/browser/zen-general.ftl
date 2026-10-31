@@ -67,6 +67,9 @@ zen-pip-timeline =
 # Joins the elapsed and total time, e.g. "1:35 of 24:01".
 zen-pip-time-of = of
 zen-pip-live = Live
+zen-pip-go-live = Go to live
+# Spoken after a duration, e.g. "5:00 behind live".
+zen-pip-behind-live = behind live
 zen-pip-restore =
   .aria-label = Show Picture-in-Picture
 

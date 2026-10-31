@@ -36,6 +36,11 @@ interface nsIZenPipNativeControls : nsISupports {
    */
   void setTimeline(in double currentTime, in double duration,
                    in boolean seekable, in boolean live);
+  /**
+   * A live stream whose timeline spans its seekable window: whether playback
+   * is at the live edge.
+   */
+  void setLiveEdge(in boolean atLiveEdge);
   void setCaptions(in boolean available, in boolean enabled);
   void setCaptionSize(in ACString size);
   /** @param stringsJSON Object of localized labels keyed by control. */
