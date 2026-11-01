@@ -15,7 +15,7 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   for glass over media — Clear, untinted, over a 35% dark dimming layer — and
   the system's own Reduce Transparency / Increase Contrast handling. Speed,
   captions and sound on the left; close, back to tab and minimize on the
-  right (swapped in personal.17 at the owner's request); ±15 s and
+  right (swapped in personal.18 at the owner's request); ±15 s and
   play/pause centered; glass timeline. Tab, Shift-Tab and VoiceOver follow
   the same order.
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
@@ -28,8 +28,9 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   can't be scrubbed shows only the badge (red dot, no timeline, not a
   button). A stream with a DVR window keeps the timeline, spanning the
   window, and the badge becomes a Go to live button: red at the live edge,
-  grey behind it, like YouTube's (personal.16; first installed in
-  personal.17).
+  grey behind it, like YouTube's (built as personal.16 and .17; first
+  installed in personal.18, which also carries the personal.15.3
+  external-link startup fix).
 - Arc-style automatic PiP: a playing, audible video pops out when its tab or
   Space is left and returns inline when it is selected again
   (`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
