@@ -1004,16 +1004,21 @@ class nsZenWorkspaces {
     };
 
     // The initial tab is marked as empty before Firefox knows what to load.
-    // Firefox then loads the homepage into it (only the first URL if there
-    // are several, see loadOneOrMoreURIs). If that is a real page, treat the
-    // tab like any other initial tab instead of removing it, or the first
-    // homepage would be lost.
+    // Firefox loads the first startup page into it. External applications
+    // supply an array, while homepages can be a pipe-separated string. Keep
+    // that page selected instead of replacing it with the empty startup view.
     const startupURI = await gBrowserInit.uriToLoadPromise;
+    const firstStartupURI = Array.isArray(startupURI)
+      ? startupURI[0]
+      : typeof startupURI === "string"
+        ? startupURI.split("|")[0]
+        : null;
     if (
       this._tabToRemoveForEmpty &&
       !this._initialTab &&
-      typeof startupURI === "string" &&
-      !isInitialPage(startupURI.split("|")[0])
+      typeof firstStartupURI === "string" &&
+      firstStartupURI &&
+      !isInitialPage(firstStartupURI)
     ) {
       delete this._tabToRemoveForEmpty._markedForReplacement;
       this._initialTab = this._tabToRemoveForEmpty;

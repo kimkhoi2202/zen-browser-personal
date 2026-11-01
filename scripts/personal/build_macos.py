@@ -28,6 +28,7 @@ VIEW='chrome/browser/content/browser/urlbar/UrlbarView.mjs'
 ZEN_CONTROLLER='modules/zen/urlbar/ZenUrlbarController.mjs'
 HELPER='modules/zen/urlbar/PersonalSiteSearch.mjs'
 ADDITIONAL_UI={
+    'modules/zen/ZenSpaceManager.mjs':'src/zen/spaces/ZenSpaceManager.mjs',
     'modules/PersonalSiteSearchHistory.sys.mjs':'src/zen/urlbar/PersonalSiteSearchHistory.sys.mjs',
     'modules/ZenUBProvider.sys.mjs':'src/zen/urlbar/ZenUBProvider.sys.mjs',
     'chrome/browser/content/browser/zen-styles/zen-personal-command-palette.css':'src/zen/common/styles/zen-personal-command-palette.css',
