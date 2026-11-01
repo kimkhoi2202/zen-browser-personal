@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (9 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (11 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -23,6 +23,11 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   edge shared with another display for about 0.2 s moves it there.
 - Minimize tucks the player into a glass pill at the screen edge.
 - Captions use System Settings > Accessibility > Captions.
+- Live streams show a glass Live badge at the bottom left. A stream that
+  can't be scrubbed shows only the badge (red dot, no timeline, not a
+  button). A stream with a DVR window keeps the timeline, spanning the
+  window, and the badge becomes a Go to live button: red at the live edge,
+  grey behind it, like YouTube's (personal.16).
 - Arc-style automatic PiP: a playing, audible video pops out when its tab or
   Space is left and returns inline when it is selected again
   (`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
