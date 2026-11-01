@@ -1,3 +1,15 @@
+# Installed external-link fix — personal.15.3
+
+Daily `/Applications/Zen.app` is installed from runtime `834cb52c`, signed,
+notarized, stapled and Gatekeeper accepted. Closed/running external HTTPS links
+passed through the actual macOS default route; the full nine-window restoration
+and multiple-URL candidate tests passed. 128 focused checks pass. The native
+personal.15 PiP engine is byte-identical, and the closed profile was preserved.
+Read [External Links.md](External%20Links.md) for source, packaging and rollback.
+No GitHub publication. Merge this startup fix into future native/PiP builds;
+`build_macos.py` now overlays `ZenSpaceManager.mjs` for future packages.
+The historical version notes below are superseded by this section.
+
 # Installed Yab-style PiP — personal.15 (full-source engine)
 
 Custom /Applications/Zen.app is personal.15: the installed personal.14 command

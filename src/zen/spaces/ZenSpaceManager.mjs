@@ -1004,16 +1004,21 @@ class nsZenWorkspaces {
     };
 
     // The initial tab is marked as empty before Firefox knows what to load.
-    // Firefox then loads the homepage into it (only the first URL if there
-    // are several, see loadOneOrMoreURIs). If that is a real page, treat the
-    // tab like any other initial tab instead of removing it, or the first
-    // homepage would be lost.
+    // Firefox loads the first startup page into it. External applications
+    // supply an array, while homepages can be a pipe-separated string. Keep
+    // that page selected instead of replacing it with the empty startup view.
     const startupURI = await gBrowserInit.uriToLoadPromise;
+    const firstStartupURI = Array.isArray(startupURI)
+      ? startupURI[0]
+      : typeof startupURI === "string"
+        ? startupURI.split("|")[0]
+        : null;
     if (
       this._tabToRemoveForEmpty &&
       !this._initialTab &&
-      typeof startupURI === "string" &&
-      !isInitialPage(startupURI.split("|")[0])
+      typeof firstStartupURI === "string" &&
+      firstStartupURI &&
+      !isInitialPage(firstStartupURI)
     ) {
       delete this._tabToRemoveForEmpty._markedForReplacement;
       this._initialTab = this._tabToRemoveForEmpty;
@@ -1091,6 +1096,42 @@ class nsZenWorkspaces {
     }
 
     await selectPromise;
+    if (
+      typeof firstStartupURI === "string" &&
+      firstStartupURI &&
+      !isInitialPage(firstStartupURI)
+    ) {
+      // Restoring another window can take focus after this window selected
+      // the externally requested page. Finish activation only once all of
+      // those windows and their spaces have restored. Do not hold up our own
+      // initialization, or the promises below could wait on each other.
+      const startupTab = gBrowser.selectedTab;
+      SessionStore.promiseAllWindowsRestored
+        .then(async () => {
+          await Promise.all(
+            [...Services.wm.getEnumerator("navigator:browser")]
+              .filter(win => !win.closed)
+              .map(win => win.gZenWorkspaces?.promiseInitialized)
+          );
+          // Each restored workspace queues its own startup focus timer below.
+          // Wait behind those timers, not just their initialization promises.
+          const activationTimer = setTimeout(() => {
+            if (
+              window.closed ||
+              startupTab.closing ||
+              gBrowser.selectedTab !== startupTab
+            ) {
+              return;
+            }
+            window.focus();
+            startupTab.linkedBrowser.focus();
+          });
+          window.addEventListener("unload", () => clearTimeout(activationTimer), {
+            once: true,
+          });
+        })
+        .catch(console.error);
+    }
     const openOnStartup = Services.prefs.getBoolPref(
       "zen.urlbar.open-on-startup",
       true
