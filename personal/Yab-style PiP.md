@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (11 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (12 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -13,10 +13,11 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 - Native macOS player chrome (`src/zen/pip`): Liquid Glass controls
   (`NSGlassEffectView`, SF Symbols, `NSSlider`) with Apple's published values
   for glass over media — Clear, untinted, over a 35% dark dimming layer — and
-  the system's own Reduce Transparency / Increase Contrast handling. Close,
-  back to tab and minimize on the left; speed, captions and sound on the
-  right; ±15 s and play/pause centered; glass timeline. Keyboard and VoiceOver
-  follow the same order.
+  the system's own Reduce Transparency / Increase Contrast handling. Speed,
+  captions and sound on the left; close, back to tab and minimize on the
+  right (swapped in personal.17 at the owner's request); ±15 s and
+  play/pause centered; glass timeline. Tab, Shift-Tab and VoiceOver follow
+  the same order.
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
   two-finger carry, corner-anchored resize, always inside the usable area of
   the source window's display and following that window. Holding it at an
@@ -27,7 +28,8 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   can't be scrubbed shows only the badge (red dot, no timeline, not a
   button). A stream with a DVR window keeps the timeline, spanning the
   window, and the badge becomes a Go to live button: red at the live edge,
-  grey behind it, like YouTube's (personal.16).
+  grey behind it, like YouTube's (personal.16; first installed in
+  personal.17).
 - Arc-style automatic PiP: a playing, audible video pops out when its tab or
   Space is left and returns inline when it is selected again
   (`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
