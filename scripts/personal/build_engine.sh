@@ -79,12 +79,38 @@ mach() {
   (cd "$ENGINE" && nice -n 10 "$PYTHON" ./mach --no-interactive "$@")
 }
 
+# surfer undoes each patch before applying it again, which only works while
+# the engine still holds that same version: a patch that changed since the
+# last import fails on top of its old version. Return every file the patches
+# touch to the pinned Firefox source first, as in a fresh checkout (import
+# rewrites those files anyway, so this costs no extra rebuild), and remove the
+# files patches create.
+restore_patched_files() {
+  local subject list file
+  subject=$(git -C "$ENGINE" log -1 --format=%s)
+  case "$subject" in
+    "Firefox "*) ;;
+    *) echo "engine/ HEAD is \"$subject\", not the pinned Firefox source" >&2; exit 1 ;;
+  esac
+  list=$(find src -name '*.patch' -exec awk '
+    /^diff --git a\// { path = substr($3, 3); files[path] = 1 }
+    /^new file mode/ { created[path] = 1 }
+    END { for (f in files) print ((f in created) ? "new " : "old ") f }' {} +)
+  # shellcheck disable=SC2046
+  (cd "$ENGINE" && git ls-files -z -- $(sed -n 's/^old //p' <<< "$list") |
+    xargs -0 git checkout HEAD --)
+  for file in $(sed -n 's/^new //p' <<< "$list"); do
+    git -C "$ENGINE" ls-files --error-unmatch -- "$file" > /dev/null 2>&1 || rm -f "$ENGINE/$file"
+  done
+}
+
 stage_prepare() {
   if [ -n "$(git status --porcelain)" ]; then
     echo "Commit or stash source changes first; the engine records HEAD." >&2
     exit 1
   fi
   echo "importing patches ($(git rev-parse --short HEAD))"
+  restore_patched_files
   npm run import > "$LOG_DIR/import.log" 2>&1
   "$PYTHON" scripts/copy_language_pack.py en-US > "$LOG_DIR/language-pack.log" 2>&1
 }

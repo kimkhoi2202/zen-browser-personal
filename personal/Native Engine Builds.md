@@ -29,7 +29,10 @@ toolchains are bootstrapped into `MOZBUILD_STATE_PATH`.
     scripts/personal/build_engine.sh all
 
 or its stages `prepare`, `instrumented`, `profile`, `optimized`, `locales`,
-`package`.
+`package`. `prepare` returns every file the patches touch to the pinned
+Firefox source before `npm run import`: surfer re-applies a patch by undoing
+the same version first, so a patch that changed since the last import would
+otherwise fail to apply in an existing tree.
 It uses Zen's own release configuration (`configs/common` and `configs/macos`
 with `ZEN_RELEASE`: optimize, release, Rust SIMD, `MOZILLA_OFFICIAL`,
 cross-language ThinLTO, `-mcpu=apple-m1`, the 26.5 SDK) and Zen's two-stage
