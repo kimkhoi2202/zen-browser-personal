@@ -1,5 +1,11 @@
 # External-link startup hotfix
 
+Installed final runtime: `834cb52c`, `personal.15.3`. Read
+`personal/External Links.md` for final verification and rollback. Generated
+test/candidate app bundles were disabled after installation; preserve them as
+evidence. To reproduce, use the attested original personal.15 rollback as the
+base, not today's already-hotfixed `/Applications/Zen.app`.
+
 The daily personal.15 engine has native PiP. Another chat is actively compiling
 later PiP changes in the shared native build tree. This hotfix changes only
 `ZenSpaceManager.mjs`; it must not import an unfinished native engine.
@@ -37,8 +43,8 @@ Run from this worktree, after committing reviewed source:
 
     node --test scripts/personal/*.test.mjs
     python3 -m unittest discover -s scripts/personal -p '*_test.py'
-    python3 scripts/personal/frontend_hotfix.py --base /Applications/Zen.app --baseline-manifest '/path/to/personal.15/Build Manifest.json' --output dist/startup-test --test
-    python3 scripts/personal/frontend_hotfix.py --base /Applications/Zen.app --baseline-manifest '/path/to/personal.15/Build Manifest.json' --output dist/startup-production
+    python3 scripts/personal/frontend_hotfix.py --base '/path/to/original/Zen personal.15.app.disabled' --baseline-manifest '/path/to/personal.15/Build Manifest.json' --output dist/startup-test --test
+    python3 scripts/personal/frontend_hotfix.py --base '/path/to/original/Zen personal.15.app.disabled' --baseline-manifest '/path/to/personal.15/Build Manifest.json' --output dist/startup-production
 
 Test mode creates **Zen (Dev - Links)** (`com.kimkhoi.zen.dev.links`) with the
 isolated `Zen Personal/External Link Test` profile. Never use the occupied normal
