@@ -1096,6 +1096,35 @@ class nsZenWorkspaces {
     }
 
     await selectPromise;
+    if (
+      typeof firstStartupURI === "string" &&
+      firstStartupURI &&
+      !isInitialPage(firstStartupURI)
+    ) {
+      // Restoring another window can take focus after this window selected
+      // the externally requested page. Finish activation only once all of
+      // those windows and their spaces have restored. Do not hold up our own
+      // initialization, or the promises below could wait on each other.
+      const startupTab = gBrowser.selectedTab;
+      SessionStore.promiseAllWindowsRestored
+        .then(async () => {
+          await Promise.all(
+            [...Services.wm.getEnumerator("navigator:browser")]
+              .filter(win => !win.closed)
+              .map(win => win.gZenWorkspaces?.promiseInitialized)
+          );
+          if (
+            window.closed ||
+            startupTab.closing ||
+            gBrowser.selectedTab !== startupTab
+          ) {
+            return;
+          }
+          window.focus();
+          startupTab.linkedBrowser.focus();
+        })
+        .catch(console.error);
+    }
     const openOnStartup = Services.prefs.getBoolPref(
       "zen.urlbar.open-on-startup",
       true

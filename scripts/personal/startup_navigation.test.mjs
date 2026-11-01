@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import { test } from 'node:test';
 
 // Exercise the real startup method without starting Gecko or touching a profile.
-const source = fs.readFileSync(new URL('../../src/zen/spaces/ZenSpaceManager.mjs', import.meta.url), 'utf8');
+const source = fs.readFileSync(process.env.ZEN_STARTUP_TEST_SOURCE ||
+  new URL('../../src/zen/spaces/ZenSpaceManager.mjs', import.meta.url), 'utf8');
 const start = source.indexOf('  async selectStartPage() {');
 const end = source.indexOf('\n  #hasSelectedStartPage', start);
 assert.ok(start > 0 && end > start);
@@ -14,6 +15,8 @@ const method = source.slice(start, end)
 
 async function restore(startupURI, { continueSession = false } = {}) {
   const timers = [], removed = [], routed = [], events = [];
+  const restoration = Promise.withResolvers();
+  let activations = 0;
   let palettes = 0;
   function tab(empty = false) {
     return { hasAttribute: name => empty && name === 'zen-empty-tab',
@@ -33,13 +36,18 @@ async function restore(startupURI, { continueSession = false } = {}) {
     delayedStartupPromise: Promise.resolve(),
     gBrowserInit: { uriToLoadPromise: Promise.resolve(startupURI) },
     gBrowser: browser,
+    SessionStore: { promiseAllWindowsRestored: restoration.promise },
     isInitialPage: uri => ['about:blank', 'about:newtab', 'about:home'].includes(uri),
     gZenUIManager: { testingEnabled: false },
     gZenSpaceRoutingManager: { async routeStartupTab(value) { routed.push(value); } },
     gZenGlanceManager: { getTabOrGlanceParent: value => value },
     gZenVerticalTabsManager: { _canReplaceNewTab: true },
-    Services: { prefs: { getBoolPref: name => name === 'zen.urlbar.open-on-startup' || continueSession } },
-    window: { docShell: {}, addEventListener() {}, dispatchEvent: value => events.push(value) },
+    Services: {
+      prefs: { getBoolPref: name => name === 'zen.urlbar.open-on-startup' || continueSession },
+      wm: { getEnumerator: () => [{ gZenWorkspaces: { promiseInitialized: Promise.resolve() } }] },
+    },
+    window: { docShell: {}, addEventListener() {}, dispatchEvent: value => events.push(value),
+      focus() { activations++; } },
     document: { documentElement: { hasAttribute: () => false } },
     BrowserCommands: { openTab() { palettes++; } },
     openLocation() { palettes++; },
@@ -57,7 +65,10 @@ async function restore(startupURI, { continueSession = false } = {}) {
   const select = Function(...Object.keys(context), `return (${method});`)(...Object.values(context));
   await select.call(manager);
   timers.forEach(callback => callback());
-  return { initial, saved, empty, selected: browser.selectedTab, removed, routed, palettes, events, manager, select };
+  return { initial, saved, empty, selected: browser.selectedTab, removed, routed, palettes, events, manager, select,
+    browser, window: context.window, get activations() { return activations; },
+    async finishWindowRestore() { restoration.resolve(); await new Promise(setImmediate); },
+  };
 }
 
 for (const [name, uri] of [
@@ -94,4 +105,35 @@ test('ordinary launch can still continue the saved session', async () => {
   const result = await restore(null, { continueSession: true });
   assert.equal(result.selected, result.saved);
   assert.equal(result.palettes, 0);
+});
+
+test('the externally requested window is activated after other windows restore', async () => {
+  const result = await restore(['https://example.com/one']);
+  assert.equal(result.activations, 0, 'must not race the remaining restored windows');
+  await result.finishWindowRestore();
+  assert.equal(result.activations, 1);
+  assert.equal(result.browser.selectedTab, result.initial);
+});
+
+test('ordinary startup does not take focus after other windows restore', async () => {
+  const result = await restore(null);
+  await result.finishWindowRestore();
+  assert.equal(result.activations, 0);
+});
+
+test('a deliberate tab change prevents delayed startup activation', async () => {
+  const result = await restore(['https://example.com/one']);
+  result.browser.selectedTab = result.saved;
+  await result.finishWindowRestore();
+  assert.equal(result.activations, 0);
+});
+
+test('closed tabs and windows are not activated after restoration', async () => {
+  for (const closeWindow of [false, true]) {
+    const result = await restore(['https://example.com/one']);
+    if (closeWindow) result.window.closed = true;
+    else result.initial.closing = true;
+    await result.finishWindowRestore();
+    assert.equal(result.activations, 0);
+  }
 });

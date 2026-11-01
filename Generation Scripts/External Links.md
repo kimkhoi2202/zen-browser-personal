@@ -9,6 +9,12 @@ when launched by an external application; startup selection previously recognize
 only a string. The first real startup URL must remain selected through workspace
 restoration, including when continuing a saved session.
 
+The daily profile also restores nine windows. Selecting the requested page in
+the first window is insufficient: a later empty restored window can cover it.
+After all windows and their workspaces finish restoring, activate the requested
+window only if its requested tab is still selected and neither has closed.
+Do not await that activation inside workspace initialization itself.
+
 Scripts:
 
 - `scripts/personal/startup_navigation.test.mjs` exercises the actual startup
@@ -43,3 +49,9 @@ restored Spaces/tabs, and restoring HTTP/HTTPS default handling to installed Zen
 Do not claim native success until the requested URL is actually displayed.
 Keep browser profiles and notarization records private. No GitHub publication
 or Actions are part of this local hotfix.
+
+`Generation Scripts/Build Link Harness.py` builds the small local AppKit fixture
+from `External Link Harness.m`. Its buttons send real HTTPS requests through
+NSWorkspace to the isolated candidate or installed daily Zen. Control those
+buttons through CUA; the fixture never changes the system default browser.
+File-open tests alone did not expose the multi-window HTTPS focus issue.
