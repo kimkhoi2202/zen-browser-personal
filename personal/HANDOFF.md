@@ -1,3 +1,18 @@
+# Installed Yab-style PiP update — personal.18
+
+Daily `/Applications/Zen.app` is personal.18 (installed 2026-10-31 20:47 with
+the owner's approval while Zen was closed): the personal.17 full-source engine
+(`3aa3815b`: PiP Live badge, top row swapped to playback options left /
+window controls right, Tab order fix) packaged from `d4b6e697`, which also
+carries the installed personal.15.3 external-link startup fix unchanged
+(`ZenSpaceManager.mjs`, byte-identical to personal.15.3). Notarization
+b54c424f Accepted, stapled, Gatekeeper accepted; 7,326 closed-profile
+fingerprints verified; personal.15.3 kept as `Previous Zen.app.disabled` in
+`~/Library/Application Support/Zen Personal/Backups/Yab Style PiP 2026-10-31 20-47-54`.
+Candidate production bundles are disabled and unregistered from Launch
+Services; http/https still open `com.kimkhoi.zen`. Details: [Yab-style PiP](Yab-style%20PiP.md).
+The external-link section below still describes that fix.
+
 # Installed external-link fix — personal.15.3
 
 Daily `/Applications/Zen.app` is installed from runtime `834cb52c`, signed,

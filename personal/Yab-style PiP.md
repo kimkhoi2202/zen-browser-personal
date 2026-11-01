@@ -50,6 +50,37 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification and installation — personal.18
+
+personal.18 = the personal.17 engine (source `3aa3815b`: Live badge, swapped
+top row, Tab fix; built by `build_engine.sh` with PGO and ThinLTO, 17 min)
+packaged from `d4b6e697`, which adds the installed personal.15.3
+external-link startup fix (a frontend overlay; no engine change).
+personal.16 (Live only) and personal.17 were built and tested as candidates
+but not installed.
+
+- Source checks: 112 Node and 16 Python fork tests; the PiP's 386 geometry
+  checks; native harness layout 141 (every size with on-demand, live and live
+  DVR timelines), keys (Tab / Shift-Tab cycles), motion 39.
+- Browser checks (independent project's `pip_integration_tests.py`):
+  personal.17 Dev candidate 92/94; the two misses are YouTube resetting its
+  own live video after a jump to the live edge (reproduced without PiP; Firefox
+  then closes the player because the video was emptied). Live checks 14/14 on
+  the personal.16 candidate; personal.18 Dev candidate smoke run 33/33.
+- Frontend comparison with the installed personal.15.3: only the PiP files,
+  en-US strings and build metadata differ (40 locale coverage lists name the
+  two new untranslated strings).
+- Developer ID signed with the installed app's designated requirement;
+  notarization b54c424f-f14d-4781-8a15-41a1ba9dafbb Accepted, stapled,
+  Gatekeeper accepted.
+- Installed 2026-10-31 20:47 while Zen was closed; 7,326 profile fingerprints
+  unchanged; installed bytes match the candidate. Rollback: `Previous
+  Zen.app.disabled` (personal.15.3) and the profile copy in `Backups/Yab
+  Style PiP 2026-10-31 20-47-54`.
+- Building it showed that `npm run import` in an existing tree fails when a
+  patch changed since the last import; `build_engine.sh prepare` now starts
+  patched files from pristine Firefox.
+
 ## Verification and installation — personal.15
 
 personal.15 is the installed personal.14 (command palette, source b6e28ada)
