@@ -304,6 +304,15 @@ NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
 - (BOOL)canBecomeKeyView {
   return self.isEnabled && !self.isHiddenOrHasHiddenAncestor;
 }
+// Tab goes up to the overlay, which moves focus in reading order (the slider
+// would otherwise follow AppKit's key-view loop, see -keyboardOrder).
+- (void)keyDown:(NSEvent*)aEvent {
+  if (aEvent.keyCode == 48 /* Tab */) {
+    [self.nextResponder keyDown:aEvent];
+    return;
+  }
+  [super keyDown:aEvent];
+}
 - (BOOL)mouseDownCanMoveWindow {
   return NO;
 }
@@ -917,15 +926,16 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mControlsRoot.hidden = YES;
   [mOverlay addSubview:mControlsRoot];
 
-  // Created in reading order, which VoiceOver follows: window controls on the
-  // left (close, back to tab, minimize), playback options on the right.
-  mClose = [self addControl:@selector(onClose:)];
-  mReturn = [self addControl:@selector(onReturn:)];
-  mMinimize = [self addControl:@selector(onMinimize:)];
+  // Created in reading order, which VoiceOver follows: playback options on the
+  // left (speed, captions, sound), window controls on the right (close, back
+  // to tab, minimize).
   mSpeed = [self addControl:@selector(onSpeed:)];
   mSpeed.capsule = YES;
   mCaptions = [self addControl:@selector(onCaptions:)];
   mSound = [self addControl:@selector(onSound:)];
+  mClose = [self addControl:@selector(onClose:)];
+  mReturn = [self addControl:@selector(onReturn:)];
+  mMinimize = [self addControl:@selector(onMinimize:)];
   mBack = [self addControl:@selector(onBack:)];
   mPlay = [self addControl:@selector(onPlay:)];
   mForward = [self addControl:@selector(onForward:)];
@@ -941,12 +951,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   captionsMenu.delegate = (id<NSMenuDelegate>)self;
   mCaptions.button.menu = captionsMenu;
 
-  // Keyboard order follows the visual reading order.
-  NSArray<NSView*>* order = @[
-    mClose.button, mReturn.button, mMinimize.button, mSpeed.button,
-    mCaptions.button, mSound.button, mBack.button, mPlay.button,
-    mForward.button, mLiveBadge.button, mTimeline.slider
-  ];
+  NSArray<NSView*>* order = [self keyboardOrder];
   for (NSUInteger i = 0; i < order.count; i++) {
     order[i].nextKeyView = order[(i + 1) % order.count];
   }
@@ -1055,6 +1060,49 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 - (NSArray<ZenPipGlassControl*>*)allGlassControls {
   return @[ mClose, mMinimize, mSpeed, mCaptions, mSound, mReturn, mBack, mPlay,
             mForward, mLiveBadge ];
+}
+
+// The visual reading order, which Tab follows. Since macOS 26 AppKit inserts
+// the controls' own subviews (button images, the slider's hosted SwiftUI
+// view) into the key-view loop, so Tab moves through this list itself rather
+// than through nextKeyView.
+- (NSArray<NSView*>*)keyboardOrder {
+  return @[
+    mSpeed.button, mCaptions.button, mSound.button, mClose.button,
+    mReturn.button, mMinimize.button, mBack.button, mPlay.button,
+    mForward.button, mLiveBadge.button, mTimeline.slider
+  ];
+}
+
+// Moves keyboard focus to the next (or previous) control that can take it,
+// wrapping around. From outside the controls, Tab starts at play/pause.
+- (void)moveKeyboardFocusBackwards:(BOOL)aBackwards {
+  NSWindow* window = mWindow;
+  if (!window || mTucked) {
+    return;
+  }
+  [self showControls];
+  NSArray<NSView*>* order = [self keyboardOrder];
+  NSResponder* responder = window.firstResponder;
+  NSInteger current = NSNotFound;
+  for (NSUInteger i = 0; i < order.count; i++) {
+    if ([responder isKindOfClass:[NSView class]] && [(NSView*)responder isDescendantOf:order[i]]) {
+      current = i;
+      break;
+    }
+  }
+  NSInteger count = order.count;
+  NSInteger start = current != NSNotFound ? current : [order indexOfObject:mPlay.button];
+  if (current == NSNotFound && !aBackwards) {
+    start -= 1;  // land on play/pause itself
+  }
+  for (NSInteger step = 1; step <= count; step++) {
+    NSView* candidate = order[((start + (aBackwards ? -step : step)) % count + count) % count];
+    if (candidate.canBecomeKeyView) {
+      [window makeFirstResponder:candidate];
+      return;
+    }
+  }
 }
 
 // Names used by debugState, focusedControlName and the test hooks.
@@ -1430,14 +1478,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL showTimeline = mLive ? seekable : (seekable || std::isfinite(mDuration));
   BOOL showLabels = !mLive && (W >= 290 || !seekable);
 
+  // Top row: playback options from the left edge, window controls against
+  // the right edge.
   CGFloat topY = H - inset - topD;
-  mClose.frame = NSMakeRect(inset, topY, topD, topD);
-  mReturn.frame = NSMakeRect(inset + topD + spacing, topY, topD, topD);
-  mMinimize.hidden = !showMinimize;
-  mMinimize.frame = NSMakeRect(inset + 2 * (topD + spacing), topY, topD, topD);
-
-  CGFloat x = W - inset;
-  for (ZenPipGlassControl* c in @[ mSound, mCaptions, mSpeed ]) {
+  CGFloat x = inset;
+  for (ZenPipGlassControl* c in @[ mSpeed, mCaptions, mSound ]) {
     BOOL show = c == mSpeed ? showSpeed : c == mCaptions ? showCaptions : YES;
     c.hidden = !show;
     if (!show) {
@@ -1448,8 +1493,17 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       NSSize text = [mSpeed.button.attributedTitle size];
       w = std::max<CGFloat>(topD, ceil(text.width) + round(20 * s));
     }
-    x -= w;
     c.frame = NSMakeRect(x, topY, w, topD);
+    x += w + spacing;
+  }
+  mMinimize.hidden = !showMinimize;
+  x = W - inset;
+  for (ZenPipGlassControl* c in @[ mMinimize, mReturn, mClose ]) {
+    if (c.isHidden) {
+      continue;
+    }
+    x -= topD;
+    c.frame = NSMakeRect(x, topY, topD, topD);
     x -= spacing;
   }
 
@@ -1774,15 +1828,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (code == 48 /* Tab */) {
     // Unhandled Tabs from a focused control bubble up to us: move along the
     // key-view loop instead of jumping back to the first control.
-    BOOL backwards = (mods & NSEventModifierFlagShift) != 0;
-    if ([self keyboardFocusInControls]) {
-      backwards ? [mWindow selectPreviousKeyView:nil] : [mWindow selectNextKeyView:nil];
-    } else {
-      [self focusControls];
-      if (backwards) {
-        [mWindow selectPreviousKeyView:nil];
-      }
-    }
+    [self moveKeyboardFocusBackwards:(mods & NSEventModifierFlagShift) != 0];
     [self noteActivity];
     return YES;
   }
@@ -2588,12 +2634,16 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (nullable NSString*)focusedControlName {
   NSResponder* responder = mWindow.firstResponder;
-  if (responder == mTimeline.slider) {
+  if (![responder isKindOfClass:[NSView class]]) {
+    return nil;
+  }
+  NSView* view = (NSView*)responder;
+  if ([view isDescendantOf:mTimeline.slider]) {
     return @"timeline";
   }
   NSDictionary<NSString*, ZenPipGlassControl*>* names = [self namedControls];
   for (NSString* name in names) {
-    if (responder == ((ZenPipGlassControl*)names[name]).button) {
+    if ([view isDescendantOf:((ZenPipGlassControl*)names[name]).button]) {
       return name;
     }
   }

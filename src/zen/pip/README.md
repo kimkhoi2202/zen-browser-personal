@@ -60,9 +60,14 @@ Settings > Appearance) changes Regular glass such as the pill; Clear glass has
 no adaptive behaviors and looks the same at any setting (measured in
 `Evidence/Experiments` of the preview project).
 
-Layout: window controls on the left — close, back to tab, minimize — and
-playback options on the right — speed, captions, sound. Creation order (which
-VoiceOver follows) and the Tab order match that reading order.
+Layout: playback options on the left — speed, captions, sound — and window
+controls on the right — close, back to tab, minimize. Creation order (which
+VoiceOver follows) and the Tab order match that reading order. Tab moves
+through that list itself (`-keyboardOrder`): since macOS 26 AppKit inserts
+the controls' own subviews (button images, the slider's hosted SwiftUI view)
+into the key-view loop, so `nextKeyView` alone no longer reaches every
+control. A live stream's Live badge sits at the bottom left (see Live
+streams).
 
 ## Live streams
 
@@ -140,4 +145,5 @@ Off macOS the component is not registered and the stock player is unchanged.
 - `tests/harness/` – builds the chrome without Gecko over an AVPlayer video in a
   real floating panel, for screenshots and real-WindowServer motion checks on
   the attached displays (`build.sh`, then `ZenPipChromeHarness <video> motion`;
-  `layout` checks every size with an on-demand, live and live DVR timeline).
+  `layout` checks every size with an on-demand, live and live DVR timeline;
+  `keys` checks the Tab and Shift-Tab cycle).
