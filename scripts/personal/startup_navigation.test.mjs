@@ -15,6 +15,10 @@ const method = source.slice(start, end)
 
 async function restore(startupURI, { continueSession = false } = {}) {
   const timers = [], removed = [], routed = [], events = [];
+  let timersRun = 0;
+  function flushTimers() {
+    while (timersRun < timers.length) timers[timersRun++]();
+  }
   const restoration = Promise.withResolvers();
   let activations = 0;
   let palettes = 0;
@@ -64,10 +68,15 @@ async function restore(startupURI, { continueSession = false } = {}) {
   };
   const select = Function(...Object.keys(context), `return (${method});`)(...Object.values(context));
   await select.call(manager);
-  timers.forEach(callback => callback());
+  flushTimers();
   return { initial, saved, empty, selected: browser.selectedTab, removed, routed, palettes, events, manager, select,
     browser, window: context.window, get activations() { return activations; },
-    async finishWindowRestore() { restoration.resolve(); await new Promise(setImmediate); },
+    queueWindowStartupFocus(callback) { timers.push(callback); },
+    async finishWindowRestore() {
+      restoration.resolve();
+      await new Promise(setImmediate);
+      flushTimers();
+    },
   };
 }
 
@@ -119,6 +128,15 @@ test('ordinary startup does not take focus after other windows restore', async (
   const result = await restore(null);
   await result.finishWindowRestore();
   assert.equal(result.activations, 0);
+});
+
+test('requested-window activation runs after the other workspace focus timers', async () => {
+  const result = await restore(['https://example.com/one']);
+  const focusOrder = [];
+  result.window.focus = () => focusOrder.push('requested');
+  result.queueWindowStartupFocus(() => focusOrder.push('other restored window'));
+  await result.finishWindowRestore();
+  assert.deepEqual(focusOrder, ['other restored window', 'requested']);
 });
 
 test('a deliberate tab change prevents delayed startup activation', async () => {

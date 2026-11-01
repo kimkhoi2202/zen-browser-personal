@@ -1013,13 +1013,6 @@ class nsZenWorkspaces {
       : typeof startupURI === "string"
         ? startupURI.split("|")[0]
         : null;
-    this.log("External startup trace", JSON.stringify({
-      window: window.__SSi, phase: "selection",
-      uriType: Array.isArray(startupURI) ? "array" : typeof startupURI,
-      hasPage: !!firstStartupURI, initialTab: !!this._initialTab,
-      replacementTab: !!this._tabToRemoveForEmpty,
-      selectedEmpty: gBrowser.selectedTab.hasAttribute("zen-empty-tab"),
-    }));
     if (
       this._tabToRemoveForEmpty &&
       !this._initialTab &&
@@ -1113,29 +1106,29 @@ class nsZenWorkspaces {
       // those windows and their spaces have restored. Do not hold up our own
       // initialization, or the promises below could wait on each other.
       const startupTab = gBrowser.selectedTab;
-      this.log("External startup trace", window.__SSi, "waiting for windows");
       SessionStore.promiseAllWindowsRestored
         .then(async () => {
-          this.log("External startup trace", window.__SSi, "windows restored");
           await Promise.all(
             [...Services.wm.getEnumerator("navigator:browser")]
               .filter(win => !win.closed)
               .map(win => win.gZenWorkspaces?.promiseInitialized)
           );
-          this.log("External startup trace", JSON.stringify({
-            window: window.__SSi, phase: "workspaces restored",
-            sameTab: gBrowser.selectedTab === startupTab,
-            closed: window.closed, tabClosing: !!startupTab.closing,
-          }));
-          if (
-            window.closed ||
-            startupTab.closing ||
-            gBrowser.selectedTab !== startupTab
-          ) {
-            return;
-          }
-          window.focus();
-          startupTab.linkedBrowser.focus();
+          // Each restored workspace queues its own startup focus timer below.
+          // Wait behind those timers, not just their initialization promises.
+          const activationTimer = setTimeout(() => {
+            if (
+              window.closed ||
+              startupTab.closing ||
+              gBrowser.selectedTab !== startupTab
+            ) {
+              return;
+            }
+            window.focus();
+            startupTab.linkedBrowser.focus();
+          });
+          window.addEventListener("unload", () => clearTimeout(activationTimer), {
+            once: true,
+          });
         })
         .catch(console.error);
     }

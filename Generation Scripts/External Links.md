@@ -14,6 +14,9 @@ the first window is insufficient: a later empty restored window can cover it.
 After all windows and their workspaces finish restoring, activate the requested
 window only if its requested tab is still selected and neither has closed.
 Do not await that activation inside workspace initialization itself.
+Each workspace also queues a startup focus timer. The final activation must
+be queued after those timers, after the initialization promises settle;
+activating in the promise callback alone still races the remaining focus work.
 
 Scripts:
 
