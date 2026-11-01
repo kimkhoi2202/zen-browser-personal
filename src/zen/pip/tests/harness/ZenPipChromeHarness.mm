@@ -9,10 +9,11 @@
 //
 //   ZenPipChromeHarness <video> visual [screenIndex] [width height]
 //   ZenPipChromeHarness <video> layout [fast]
+//   ZenPipChromeHarness <video> keys
 //   ZenPipChromeHarness <video> motion
 //
-// "layout" (on-demand, live and live DVR timelines) and "motion" exit
-// non-zero if any check fails. Video playback is muted.
+// "layout" (on-demand, live and live DVR timelines), "keys" (Tab order) and
+// "motion" exit non-zero if any check fails. Video playback is muted.
 
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
@@ -340,6 +341,53 @@ int main(int argc, char** argv) {
                     [edge[@"timeline"][@"accessibilityValue"] isEqualToString:@"Live"],
                 @"live DVR: back at the live edge the dot is red (VoiceOver: Live)");
         }
+      }
+      timeline = Timeline::OnDemand;
+      Print([NSString stringWithFormat:@"SUMMARY %d failure(s)", failures]);
+    } else if ([mode isEqualToString:@"keys"]) {
+      // Tab and Shift-Tab through the controls with real key events, the way
+      // a keyboard user moves: reading order, wrapping around, both ways.
+      [chrome revealControlsSticky:YES];
+      Spin(0.6);
+      auto press = [&](NSEventModifierFlags aMods) {
+        [chrome testKey:48 characters:@"\t" modifiers:aMods];
+        Spin(0.05);
+        return (NSString*)([chrome debugState][@"focusedControl"] ?: @"");
+      };
+      NSArray* cycle = @[ @"playPause", @"forward15", @"timeline", @"speed", @"captions",
+                          @"sound", @"close", @"return", @"minimize", @"back15",
+                          @"playPause" ];
+      NSMutableArray* forward = [NSMutableArray array];
+      for (NSUInteger i = 0; i < cycle.count; i++) {
+        [forward addObject:press(0)];
+      }
+      check([forward isEqualToArray:cycle],
+            [NSString stringWithFormat:@"Tab: %@", [forward componentsJoinedByString:@" -> "]]);
+      NSMutableArray* backward = [NSMutableArray array];
+      for (NSUInteger i = 1; i < cycle.count; i++) {
+        [backward addObject:press(NSEventModifierFlagShift)];
+      }
+      NSArray* expected =
+          [[[cycle subarrayWithRange:NSMakeRange(0, cycle.count - 1)] reverseObjectEnumerator]
+              allObjects];
+      check([backward isEqualToArray:expected],
+            [NSString stringWithFormat:@"Shift-Tab: %@",
+                                       [backward componentsJoinedByString:@" -> "]]);
+      // Live streams: the Go to live button joins the cycle before the
+      // timeline; a status-only badge (with no timeline) is skipped.
+      for (Timeline kind : {Timeline::LiveDVR, Timeline::Live}) {
+        timeline = kind;
+        Spin(0.6);
+        while (![press(0) isEqualToString:@"playPause"]) {
+        }
+        NSArray* after = @[ press(0), press(0), press(0) ];
+        NSArray* want = kind == Timeline::LiveDVR
+                            ? @[ @"forward15", @"live", @"timeline" ]
+                            : @[ @"speed", @"captions", @"sound" ];
+        check([after isEqualToArray:want],
+              [NSString stringWithFormat:@"%@ after play/pause: %@",
+                                         kind == Timeline::LiveDVR ? @"live DVR" : @"live",
+                                         [after componentsJoinedByString:@" -> "]]);
       }
       timeline = Timeline::OnDemand;
       Print([NSString stringWithFormat:@"SUMMARY %d failure(s)", failures]);
