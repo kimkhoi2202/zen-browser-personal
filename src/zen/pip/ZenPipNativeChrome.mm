@@ -10,6 +10,8 @@
 #import <MediaAccessibility/MediaAccessibility.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include "ZenPipGeometry.h"
@@ -52,6 +54,8 @@ constexpr NSTimeInterval kInitialRevealDuration = 2.5;
 // Apple's dark dimming layer for Clear glass over bright content (HIG
 // "Materials": "consider adding a dark dimming layer of 35% opacity").
 constexpr CGFloat kDimmingOpacity = 0.35;
+// The speeds the speed menu offers.
+constexpr double kSpeedMenuRates[] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
 
 struct Config {
   double edgeGap = 10;
@@ -107,6 +111,28 @@ NSString* FormatRate(double aRate) {
   f.maximumFractionDigits = 2;
   f.minimumIntegerDigits = 1;
   return [[f stringFromNumber:@(aRate)] stringByAppendingString:@"×"];
+}
+
+bool SameRate(double aA, double aB) {
+  return std::abs(aA - aB) < 0.001;
+}
+
+// The speed button is a gauge whose needle shows the speed: straight up at
+// normal speed, leaning left when slower and right when faster.
+NSString* SpeedSymbolName(double aRate) {
+  if (aRate < 0.75 && !SameRate(aRate, 0.75)) {
+    return @"gauge.with.dots.needle.0percent";
+  }
+  if (aRate < 1 && !SameRate(aRate, 1)) {
+    return @"gauge.with.dots.needle.33percent";
+  }
+  if (SameRate(aRate, 1)) {
+    return @"gauge.with.dots.needle.50percent";
+  }
+  if (aRate < 2 && !SameRate(aRate, 2)) {
+    return @"gauge.with.dots.needle.67percent";
+  }
+  return @"gauge.with.dots.needle.100percent";
 }
 
 NSImage* Symbol(NSString* aName, CGFloat aPointSize, NSFontWeight aWeight) {
@@ -758,6 +784,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   ZenPipGlassControl* mLiveBadge;
   ZenPipTimeline* mTimeline;
   ZenPipTuckPanel* mTuckPanel;
+  NSString* mSpeedSymbol;  // as last drawn
+  // Drops double-clicks on the window's resize border (see init).
+  id mClickMonitor;
+  BOOL mSwallowingPress;  // the rest of a dropped press: drags, release
 
   // Playback state mirrored from the original video.
   BOOL mPlaying;
@@ -860,6 +890,21 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mPreviousFirstResponder = aWindow.firstResponder;
   [aWindow makeFirstResponder:mOverlay];
 
+  // AppKit grows a window toward the screen corner when one of its corners
+  // is double-clicked, before the overlay sees the click. The player's size
+  // only changes by dragging, so on the resize border the second press of a
+  // double-click never reaches the window.
+  __weak ZenPipPlayerChrome* weakChrome = self;
+  mClickMonitor = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown |
+                                           NSEventMaskLeftMouseDragged |
+                                           NSEventMaskLeftMouseUp
+                                   handler:^NSEvent*(NSEvent* aEvent) {
+                                     ZenPipPlayerChrome* chrome = weakChrome;
+                                     return chrome ? [chrome filterResizeBorderPress:aEvent]
+                                                   : aEvent;
+                                   }];
+
   [self observeNotifications];
   [self applyAppearance];
   [self refreshAllControls];
@@ -927,15 +972,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [mOverlay addSubview:mControlsRoot];
 
   // Created in reading order, which VoiceOver follows: playback options on the
-  // left (speed, captions, sound), window controls on the right (close, back
-  // to tab, minimize).
+  // left (speed, captions, sound), window controls on the right (back to tab,
+  // minimize, close).
   mSpeed = [self addControl:@selector(onSpeed:)];
-  mSpeed.capsule = YES;
   mCaptions = [self addControl:@selector(onCaptions:)];
   mSound = [self addControl:@selector(onSound:)];
-  mClose = [self addControl:@selector(onClose:)];
   mReturn = [self addControl:@selector(onReturn:)];
   mMinimize = [self addControl:@selector(onMinimize:)];
+  mClose = [self addControl:@selector(onClose:)];
   mBack = [self addControl:@selector(onBack:)];
   mPlay = [self addControl:@selector(onPlay:)];
   mForward = [self addControl:@selector(onForward:)];
@@ -1068,8 +1112,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // than through nextKeyView.
 - (NSArray<NSView*>*)keyboardOrder {
   return @[
-    mSpeed.button, mCaptions.button, mSound.button, mClose.button,
-    mReturn.button, mMinimize.button, mBack.button, mPlay.button,
+    mSpeed.button, mCaptions.button, mSound.button, mReturn.button,
+    mMinimize.button, mClose.button, mBack.button, mPlay.button,
     mForward.button, mLiveBadge.button, mTimeline.slider
   ];
 }
@@ -1317,7 +1361,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                                                : 13 * s;
   NSFontWeight weight = mAppearance.increaseContrast ? NSFontWeightBold
                                                      : NSFontWeightSemibold;
-  NSImage* image = Symbol(aSymbol, std::max<CGFloat>(point, 11), weight);
+  CGFloat size = std::max<CGFloat>(point, 11);
+  if (aControl == mSpeed) {
+    size *= 1.12;  // the gauge glyph is optically smaller than its neighbors'
+  }
+  NSImage* image = Symbol(aSymbol, size, weight);
   NSString* label = [self string:aKey fallback:aFallback];
   aControl.button.image = image;
   aControl.button.title = image ? @"" : label;
@@ -1360,24 +1408,18 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)refreshSpeedButton {
-  CGFloat s = [self symbolScale];
-  NSString* title = FormatRate(mRate);
-  NSFont* font = [NSFont monospacedDigitSystemFontOfSize:std::max<CGFloat>(12.5 * s, 11)
-                                                  weight:mAppearance.increaseContrast
-                                                             ? NSFontWeightBold
-                                                             : NSFontWeightSemibold];
-  mSpeed.button.image = nil;
-  mSpeed.button.imagePosition = NSNoImage;
-  mSpeed.button.attributedTitle = [[NSAttributedString alloc]
-      initWithString:title
-          attributes:@{
-            NSFontAttributeName : font,
-            NSForegroundColorAttributeName : NSColor.whiteColor
-          }];
-  NSString* label = [self string:@"speed" fallback:@"Playback speed"];
-  mSpeed.button.accessibilityLabel = label;
-  mSpeed.button.accessibilityValueDescription = title;
-  mSpeed.button.toolTip = [NSString stringWithFormat:@"%@ (%@)", label, title];
+  NSString* symbol = SpeedSymbolName(mRate);
+  [self configureButton:mSpeed symbol:symbol key:@"speed" fallback:@"Playback speed"];
+  if (!mSpeed.button.image) {
+    // The needle positions are new in macOS 13; before that, a plain gauge.
+    symbol = @"speedometer";
+    [self configureButton:mSpeed symbol:symbol key:@"speed" fallback:@"Playback speed"];
+  }
+  mSpeedSymbol = symbol;
+  NSString* rate = FormatRate(mRate);
+  mSpeed.button.accessibilityValueDescription = rate;
+  mSpeed.button.toolTip = [NSString
+      stringWithFormat:@"%@ (%@)", [self string:@"speed" fallback:@"Playback speed"], rate];
 }
 
 - (void)refreshTimeline {
@@ -1479,7 +1521,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL showLabels = !mLive && (W >= 290 || !seekable);
 
   // Top row: playback options from the left edge, window controls against
-  // the right edge.
+  // the right edge with close in the corner.
   CGFloat topY = H - inset - topD;
   CGFloat x = inset;
   for (ZenPipGlassControl* c in @[ mSpeed, mCaptions, mSound ]) {
@@ -1488,17 +1530,12 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     if (!show) {
       continue;
     }
-    CGFloat w = topD;
-    if (c == mSpeed) {
-      NSSize text = [mSpeed.button.attributedTitle size];
-      w = std::max<CGFloat>(topD, ceil(text.width) + round(20 * s));
-    }
-    c.frame = NSMakeRect(x, topY, w, topD);
-    x += w + spacing;
+    c.frame = NSMakeRect(x, topY, topD, topD);
+    x += topD + spacing;
   }
   mMinimize.hidden = !showMinimize;
   x = W - inset;
-  for (ZenPipGlassControl* c in @[ mMinimize, mReturn, mClose ]) {
+  for (ZenPipGlassControl* c in @[ mClose, mMinimize, mReturn ]) {
     if (c.isHidden) {
       continue;
     }
@@ -1717,23 +1754,43 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self noteActivity];
 }
 
-- (void)onSpeed:(id)aSender {
+// The speed button's drop-down: a "Playback speed" heading over the speeds,
+// with the current one checked (also when the site chose a speed of its own).
+- (NSMenu*)speedMenu {
   NSMenu* menu = [[NSMenu alloc] init];
   menu.delegate = (id<NSMenuDelegate>)self;
-  for (double rate : {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0}) {
+  NSString* title = [self string:@"speed" fallback:@"Playback speed"];
+  NSMenuItem* header = nil;
+  if (@available(macOS 14.0, *)) {
+    header = [NSMenuItem sectionHeaderWithTitle:title];
+  } else {
+    header = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    header.enabled = NO;
+  }
+  [menu addItem:header];
+  std::vector<double> rates(std::begin(kSpeedMenuRates), std::end(kSpeedMenuRates));
+  if (std::none_of(rates.begin(), rates.end(), [&](double r) { return SameRate(r, mRate); })) {
+    rates.push_back(mRate);
+    std::sort(rates.begin(), rates.end());
+  }
+  for (double rate : rates) {
     NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:FormatRate(rate)
                                                   action:@selector(onRateItem:)
                                            keyEquivalent:@""];
     item.target = self;
     item.representedObject = @(rate);
-    item.state = std::abs(rate - mRate) < 0.001 ? NSControlStateValueOn
-                                                : NSControlStateValueOff;
+    item.state = SameRate(rate, mRate) ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:item];
   }
+  return menu;
+}
+
+- (void)onSpeed:(id)aSender {
   NSButton* button = mSpeed.button;
-  [menu popUpMenuPositioningItem:nil
-                      atLocation:NSMakePoint(0, NSHeight(button.bounds) + 4)
-                          inView:button];
+  // Drops down from the button's bottom-left corner (NSButton is flipped).
+  [[self speedMenu] popUpMenuPositioningItem:nil
+                                  atLocation:NSMakePoint(0, NSHeight(button.bounds) + 4)
+                                      inView:button];
   [self noteActivity];
 }
 
@@ -2121,6 +2178,39 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (right) return @((int)ResizeHandle::Right);
   if (bottom) return @((int)ResizeHandle::Bottom);
   if (top) return @((int)ResizeHandle::Top);
+  return nil;
+}
+
+// The local event monitor's filter (see init). The second (or later) press
+// of a multi-click on the resize border (edges and corners, where AppKit
+// resizes; just outside the window too) is dropped with its drags and its
+// release. AppKit detects the double-click itself, so passing the press on
+// with a click count of 1 would not stop it.
+- (nullable NSEvent*)filterResizeBorderPress:(NSEvent*)aEvent {
+  if (aEvent.type != NSEventTypeLeftMouseDown) {
+    if (!mSwallowingPress) {
+      return aEvent;
+    }
+    if (aEvent.type == NSEventTypeLeftMouseUp) {
+      mSwallowingPress = NO;
+    }
+    return nil;
+  }
+  mSwallowingPress = NO;
+  NSWindow* window = mWindow;
+  if (mInvalidated || !window || aEvent.window != window || aEvent.clickCount < 2) {
+    return aEvent;
+  }
+  NSPoint p = aEvent.locationInWindow;
+  NSSize size = window.frame.size;
+  CGFloat dx = std::min(p.x, size.width - p.x);
+  CGFloat dy = std::min(p.y, size.height - p.y);
+  BOOL border = dx < kResizeBand || dy < kResizeBand ||
+                (dx < kResizeCornerBand && dy < kResizeCornerBand);
+  if (!border) {
+    return aEvent;
+  }
+  mSwallowingPress = YES;
   return nil;
 }
 
@@ -2568,8 +2658,26 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"statusOnly" : @(c.statusOnly),
     }];
   }
+  NSMutableArray* speedItems = [NSMutableArray array];
+  NSMenu* speedMenu = [self speedMenu];
+  for (NSMenuItem* item in speedMenu.itemArray) {
+    if (item.representedObject) {
+      [speedItems addObject:@{
+        @"title" : item.title,
+        @"rate" : item.representedObject,
+        @"checked" : @(item.state == NSControlStateValueOn),
+      }];
+    }
+  }
   NSScreen* screen = [self sourceScreen];
   return @{
+    @"speed" : @{
+      @"symbol" : mSpeedSymbol ?: @"",
+      @"tooltip" : mSpeed.button.toolTip ?: @"",
+      @"accessibilityValue" : mSpeed.button.accessibilityValueDescription ?: @"",
+      @"menuTitle" : speedMenu.numberOfItems ? [speedMenu itemAtIndex:0].title : @"",
+      @"menu" : speedItems,
+    },
     @"liquidGlass" : @([ZenPipPlayerChrome hasLiquidGlass]),
     @"containerClass" : NSStringFromClass(mControlsRoot.class),
     @"timelineMaterial" : NSStringFromClass(mTimeline.material.class),
@@ -2670,6 +2778,46 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                    isARepeat:NO
                                      keyCode:aKeyCode];
   [window sendEvent:event];
+}
+
+- (BOOL)testDoubleClick:(NSString*)aWhere {
+  NSWindow* window = mWindow;
+  if (!window) {
+    return NO;
+  }
+  // 4 pt inside a corner is inside AppKit's own corner resize area.
+  NSSize size = window.frame.size;
+  NSDictionary<NSString*, NSValue*>* points = @{
+    @"top-left" : [NSValue valueWithPoint:NSMakePoint(4, size.height - 4)],
+    @"top-right" : [NSValue valueWithPoint:NSMakePoint(size.width - 4, size.height - 4)],
+    @"bottom-left" : [NSValue valueWithPoint:NSMakePoint(4, 4)],
+    @"bottom-right" : [NSValue valueWithPoint:NSMakePoint(size.width - 4, 4)],
+    @"center" : [NSValue valueWithPoint:NSMakePoint(size.width / 2, size.height / 2)],
+  };
+  NSValue* point = points[aWhere];
+  if (!point) {
+    return NO;
+  }
+  // Queued like real input: the events pass through the application's event
+  // dispatch (and its event monitors) and AppKit's own tracking loops.
+  NSTimeInterval t = NSProcessInfo.processInfo.systemUptime;
+  for (NSInteger click = 1; click <= 2; click++) {
+    for (NSEventType type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp}) {
+      NSEvent* event = [NSEvent mouseEventWithType:type
+                                          location:point.pointValue
+                                     modifierFlags:0
+                                         timestamp:t
+                                      windowNumber:window.windowNumber
+                                           context:nil
+                                       eventNumber:0
+                                        clickCount:click
+                                          pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+      [NSApp postEvent:event atStart:NO];
+      t += 0.04;
+    }
+    t += 0.08;
+  }
+  return YES;
 }
 
 - (BOOL)glassIsInteractive:(NSView*)aMaterial {
@@ -2797,7 +2945,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (BOOL)testClickControl:(NSString*)aName {
   NSDictionary<NSString*, ZenPipGlassControl*>* names = [self namedControls];
-  ZenPipGlassControl* control = names[aName];
+  BOOL speedWithRate = [aName hasPrefix:@"speed:"];
+  ZenPipGlassControl* control = speedWithRate ? mSpeed : names[aName];
   if ([aName hasPrefix:@"timeline:"]) {
     // Moves the real NSSlider and fires its action, like a keyboard or
     // VoiceOver adjustment would.
@@ -2821,8 +2970,38 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return NO;
   }
   if (control == mSpeed) {
-    // The rate menu is modal; exercise its item action instead.
-    [self notifyHost:"set-rate" value:(mRate >= 2 ? 1 : mRate + 0.5) detail:nil];
+    // The menu is modal, so pick from the same menu without opening it:
+    // "speed" takes the speed after the checked one, "speed:<rate>" that one.
+    [self showControls];
+    NSMenu* menu = [self speedMenu];
+    NSMutableArray<NSNumber*>* rateItems = [NSMutableArray array];
+    NSInteger checked = -1;
+    for (NSInteger i = 0; i < menu.numberOfItems; i++) {
+      NSMenuItem* item = [menu itemAtIndex:i];
+      if (!item.representedObject) {
+        continue;
+      }
+      if (item.state == NSControlStateValueOn) {
+        checked = (NSInteger)rateItems.count;
+      }
+      [rateItems addObject:@(i)];
+    }
+    NSInteger pick = -1;
+    if (speedWithRate) {
+      double want = [[aName substringFromIndex:6] doubleValue];
+      for (NSUInteger j = 0; j < rateItems.count; j++) {
+        NSMenuItem* item = [menu itemAtIndex:rateItems[j].integerValue];
+        if (SameRate([item.representedObject doubleValue], want)) {
+          pick = rateItems[j].integerValue;
+        }
+      }
+    } else if (rateItems.count) {
+      pick = rateItems[(NSUInteger)(checked + 1) % rateItems.count].integerValue;
+    }
+    if (pick < 0) {
+      return NO;
+    }
+    [menu performActionForItemAtIndex:pick];
     return YES;
   }
   [self showControls];
@@ -2837,6 +3016,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   mInvalidated = YES;
+  if (mClickMonitor) {
+    [NSEvent removeMonitor:mClickMonitor];
+    mClickMonitor = nil;
+  }
   [self stopAnimation];
   [self cancelEdgeHold];
   [mHideTimer invalidate];

@@ -61,13 +61,28 @@ no adaptive behaviors and looks the same at any setting (measured in
 `Evidence/Experiments` of the preview project).
 
 Layout: playback options on the left — speed, captions, sound — and window
-controls on the right — close, back to tab, minimize. Creation order (which
-VoiceOver follows) and the Tab order match that reading order. Tab moves
-through that list itself (`-keyboardOrder`): since macOS 26 AppKit inserts
-the controls' own subviews (button images, the slider's hosted SwiftUI view)
-into the key-view loop, so `nextKeyView` alone no longer reaches every
-control. A live stream's Live badge sits at the bottom left (see Live
-streams).
+controls on the right — back to tab, minimize, close (in the corner). Creation
+order (which VoiceOver follows) and the Tab order match that reading order.
+Tab moves through that list itself (`-keyboardOrder`): since macOS 26 AppKit
+inserts the controls' own subviews (button images, the slider's hosted
+SwiftUI view) into the key-view loop, so `nextKeyView` alone no longer
+reaches every control. A live stream's Live badge sits at the bottom left
+(see Live streams).
+
+The speed button is a round glass button like the others: an SF Symbols
+gauge whose needle shows the speed (up at 1×, leaning left when slower and
+right when faster; a plain `speedometer` before macOS 13). It drops down a
+native menu headed "Playback speed" with 0.5× to 2× and the current speed
+checked, including a speed the site chose itself (such as 1.1×). VoiceOver
+reads the speed as the button's value.
+
+Double-clicks: on the video they toggle playback. On the resize border (the
+9 pt edges and 18 pt corners, and just outside the window) they do nothing.
+AppKit itself grows a resizable window toward the screen corner when one of
+its corners is double-clicked, before the overlay sees the click, and it
+detects the double-click itself, so the chrome's local event monitor drops
+the second press there with its drags and its release. A single press still
+resizes as usual.
 
 ## Live streams
 
@@ -145,5 +160,6 @@ Off macOS the component is not registered and the stock player is unchanged.
 - `tests/harness/` – builds the chrome without Gecko over an AVPlayer video in a
   real floating panel, for screenshots and real-WindowServer motion checks on
   the attached displays (`build.sh`, then `ZenPipChromeHarness <video> motion`;
-  `layout` checks every size with an on-demand, live and live DVR timeline;
-  `keys` checks the Tab and Shift-Tab cycle).
+  `layout` checks every size with an on-demand, live and live DVR timeline and
+  the top-row order; `keys` checks the Tab and Shift-Tab cycle; `clicks`
+  checks double-clicks on the corners and the video, and the speed menu).

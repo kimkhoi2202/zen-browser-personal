@@ -105,9 +105,15 @@ class ChromeHost {
               duration:(NSTimeInterval)aDuration
      restBeforeRelease:(NSTimeInterval)aRest;
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta;
+// Queues a real double-click (two down/up pairs) 4 pt inside a corner
+// ("top-left", "top-right", "bottom-left", "bottom-right") or at the
+// "center", through the application's normal event dispatch.
+- (BOOL)testDoubleClick:(NSString*)aWhere;
 // Two-finger carry: synthesized continuous scroll events (began, changed,
 // ended) through the real scroll handler; `aDelta` is the finger travel.
 - (void)testCarryBy:(NSPoint)aDelta;
+// A named control (see debugState), "timeline:<0..1>", "restore", or for the
+// speed menu "speed" (the next speed) and "speed:<rate>".
 - (BOOL)testClickControl:(NSString*)aName;
 - (void)testKey:(unsigned short)aKeyCode
      characters:(NSString*)aCharacters

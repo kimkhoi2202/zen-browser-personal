@@ -286,6 +286,12 @@ nsZenPipNativeControls::TestKey(uint16_t aKeyCode, const nsACString& aCharacters
 }
 
 NS_IMETHODIMP
+nsZenPipNativeControls::TestDoubleClick(const nsACString& aWhere, bool* aQueued) {
+  *aQueued = [mChrome testDoubleClick:ToNSString(aWhere)];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsZenPipNativeControls::Destroy() {
   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
   if (mChrome) {
