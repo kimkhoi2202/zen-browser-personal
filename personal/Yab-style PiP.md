@@ -32,7 +32,9 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   edge shared with another display for about 0.2 s moves it there.
 - Minimize tucks the player into a glass pill at the screen edge.
 - Captions use System Settings > Accessibility > Captions.
-- Live streams show a glass Live badge at the bottom left. A stream that
+- Live streams show a glass Live badge at the bottom left (known glitch: for
+  2–3 s after Go to live, while YouTube buffers and reports no window end,
+  the bar collapses to the status bubble). A stream that
   can't be scrubbed shows only the badge (red dot, no timeline, not a
   button). A stream with a DVR window keeps the timeline, spanning the
   window, and the badge becomes a Go to live button: red at the live edge,
@@ -58,7 +60,7 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## Verification — personal.19 (candidate, not installed yet)
+## Verification and installation — personal.19
 
 personal.19 = a new full-source engine from `ecbcde23` (gauge speed button
 with its Playback speed menu; back to tab, minimize, close; corner
@@ -86,6 +88,12 @@ fix carries over unchanged.
   accepted. Stapling and the Gatekeeper check register a bundle even under a
   `.app.disabled` name, and older disabled copies had been re-registered;
   all were unregistered so only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+- Installed 2026-11-03 13:58 with the owner's approval while Zen was closed:
+  20,340 profile fingerprints unchanged; installed bytes match the candidate;
+  signature, staple and Gatekeeper verified in place; the installed XUL
+  carries the new chrome. http/https still open `com.kimkhoi.zen`. Rollback:
+  `Previous Zen.app.disabled` (personal.18) and the profile copy in
+  `Backups/Yab Style PiP 2026-11-03 13-58-01`.
 
 ## Verification and installation — personal.18
 

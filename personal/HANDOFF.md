@@ -1,13 +1,16 @@
-# Yab-style PiP update ready — personal.19 (not installed yet)
+# Installed Yab-style PiP update — personal.19
 
-A personal.19 production candidate is built, notarized (884e4537 Accepted)
-and stapled in `dist/yab-pip-personal.19-production` (as `Zen.app.disabled`;
-rename it back only to install): the gauge speed button with its Playback
-speed menu, back to tab / minimize / close order and the corner double-click
-fix, on a new full-source engine from `ecbcde23`. It installs with
-`Private/Yab Style PiP/Install Ready.py <candidate Zen.app> ecbcde2378455c1ea2dfb455027764dd96b90f54`
-once the owner approves and has quit Zen. Daily Zen is still personal.18.
-Details: [Yab-style PiP](Yab-style%20PiP.md).
+Daily `/Applications/Zen.app` is personal.19 (installed 2026-11-03 13:58 with
+the owner's approval while Zen was closed): a new full-source engine from
+`ecbcde23` with the gauge speed button and its Playback speed menu, the back
+to tab / minimize / close order (close in the corner) and the corner
+double-click fix; everything else (including the personal.15.3 external-link
+fix) is identical to personal.18. Notarization 884e4537 Accepted, stapled,
+Gatekeeper accepted; 20,340 closed-profile fingerprints verified; personal.18
+kept as `Previous Zen.app.disabled` in
+`~/Library/Application Support/Zen Personal/Backups/Yab Style PiP 2026-11-03 13-58-01`.
+Only `/Applications/Zen.app` is registered for `com.kimkhoi.zen`. Details:
+[Yab-style PiP](Yab-style%20PiP.md).
 
 # Installed Yab-style PiP update — personal.18
 
