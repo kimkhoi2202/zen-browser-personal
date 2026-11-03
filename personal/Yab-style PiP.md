@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (12 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (13 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -14,10 +14,18 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   (`NSGlassEffectView`, SF Symbols, `NSSlider`) with Apple's published values
   for glass over media — Clear, untinted, over a 35% dark dimming layer — and
   the system's own Reduce Transparency / Increase Contrast handling. Speed,
-  captions and sound on the left; close, back to tab and minimize on the
-  right (swapped in personal.18 at the owner's request); ±15 s and
-  play/pause centered; glass timeline. Tab, Shift-Tab and VoiceOver follow
-  the same order.
+  captions and sound on the left; back to tab, minimize and close on the
+  right, close in the corner (sides swapped in personal.18, that order in
+  personal.19, both at the owner's request); ±15 s and play/pause centered;
+  glass timeline. Tab, Shift-Tab and VoiceOver follow the same order.
+- The speed button is a glass gauge whose needle shows the speed (up at 1×,
+  leaning left when slower, right when faster); it drops down a native
+  "Playback speed" menu with the current speed checked (personal.19; it
+  showed "1×" as text before).
+- Double-clicking a corner of the player does nothing: AppKit would grow the
+  window toward the screen corner, so the chrome drops the second press on
+  the resize border. A double-click on the video toggles playback
+  (personal.19).
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
   two-finger carry, corner-anchored resize, always inside the usable area of
   the source window's display and following that window. Holding it at an
