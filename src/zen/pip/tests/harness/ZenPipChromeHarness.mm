@@ -10,10 +10,13 @@
 //   ZenPipChromeHarness <video> visual [screenIndex] [width height]
 //   ZenPipChromeHarness <video> layout [fast]
 //   ZenPipChromeHarness <video> keys
+//   ZenPipChromeHarness <video> clicks
 //   ZenPipChromeHarness <video> motion
 //
-// "layout" (on-demand, live and live DVR timelines), "keys" (Tab order) and
-// "motion" exit non-zero if any check fails. Video playback is muted.
+// "layout" (on-demand, live and live DVR timelines), "keys" (Tab order),
+// "clicks" (double-clicks on the corners, the speed menu) and "motion" exit
+// non-zero if any check fails. Video playback is muted.
+// ZEN_PIP_HARNESS_MENU=<png> in "clicks" also saves the open speed menu.
 
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
@@ -76,8 +79,19 @@ class HarnessHost final : public ChromeHost {
   }
 };
 
+// Never the key window: the clicks the harness queues would otherwise make it
+// key and send whatever the user is typing in another app to the player.
+// Key events in the checks go straight to the window (testKey).
+@interface HarnessPanel : NSPanel
+@end
+@implementation HarnessPanel
+- (BOOL)canBecomeKeyWindow {
+  return NO;
+}
+@end
+
 static NSPanel* MakePlayerPanel(NSRect aFrame) {
-  NSPanel* panel = [[NSPanel alloc]
+  NSPanel* panel = [[HarnessPanel alloc]
       initWithContentRect:aFrame
                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskResizable |
                           NSWindowStyleMaskFullSizeContentView |
@@ -98,6 +112,21 @@ static NSPanel* MakePlayerPanel(NSRect aFrame) {
 
 static void Spin(NSTimeInterval aSeconds) {
   [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:aSeconds]];
+}
+
+// Like Spin, but also dispatches queued events the way the application's
+// event loop does (through -[NSApplication sendEvent:] and its monitors).
+static void Pump(NSTimeInterval aSeconds) {
+  NSDate* until = [NSDate dateWithTimeIntervalSinceNow:aSeconds];
+  while (until.timeIntervalSinceNow > 0) {
+    NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                        untilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]
+                                           inMode:NSDefaultRunLoopMode
+                                          dequeue:YES];
+    if (event) {
+      [NSApp sendEvent:event];
+    }
+  }
 }
 
 static void WaitUntilSettled(ZenPipPlayerChrome* aChrome) {
@@ -277,6 +306,42 @@ int main(int argc, char** argv) {
           }
           check(!overlap,
                 [NSString stringWithFormat:@"%@ no two visible controls overlap", where]);
+          // Top row, left to right: speed, captions, sound ... back to tab,
+          // minimize, close (in the corner). All are circles of one size.
+          {
+            NSMutableArray* row = [NSMutableArray array];
+            NSMutableArray* sizes = [NSMutableArray array];
+            for (NSString* name in @[ @"speed", @"captions", @"sound", @"return", @"minimize",
+                                      @"close" ]) {
+              NSDictionary* c = controlNamed(state, name);
+              if (c && ![c[@"hidden"] boolValue]) {
+                NSRect fr = frameOf(c[@"frame"]);
+                [row addObject:@[ @(NSMinX(fr)), name ]];
+                [sizes addObject:[NSString stringWithFormat:@"%.0fx%.0f", fr.size.width,
+                                                            fr.size.height]];
+              }
+            }
+            NSArray* byX = [row sortedArrayUsingComparator:^NSComparisonResult(NSArray* a,
+                                                                               NSArray* b) {
+              return [a[0] compare:b[0]];
+            }];
+            NSMutableArray* names = [NSMutableArray array];
+            NSMutableArray* sortedNames = [NSMutableArray array];
+            for (NSUInteger i = 0; i < row.count; i++) {
+              [names addObject:row[i][1]];
+              [sortedNames addObject:byX[i][1]];
+            }
+            // Close sits as far from the right edge as the first control
+            // sits from the left one.
+            CGFloat leftInset = [byX.firstObject[0] doubleValue];
+            NSRect close = frameOf(controlNamed(state, @"close")[@"frame"]);
+            check([names isEqualToArray:sortedNames] && [NSSet setWithArray:sizes].count == 1 &&
+                      [sortedNames.lastObject isEqualToString:@"close"] &&
+                      std::abs((s.width - NSMaxX(close)) - leftInset) < 1,
+                  [NSString stringWithFormat:@"%@ top row %@ (%@), close in the corner", where,
+                                             [sortedNames componentsJoinedByString:@" "],
+                                             [sizes componentsJoinedByString:@" "]]);
+          }
           NSDictionary* live = controlNamed(state, @"live");
           BOOL liveShown = live && ![live[@"hidden"] boolValue];
           if (kind == Timeline::OnDemand) {
@@ -355,7 +420,7 @@ int main(int argc, char** argv) {
         return (NSString*)([chrome debugState][@"focusedControl"] ?: @"");
       };
       NSArray* cycle = @[ @"playPause", @"forward15", @"timeline", @"speed", @"captions",
-                          @"sound", @"close", @"return", @"minimize", @"back15",
+                          @"sound", @"return", @"minimize", @"close", @"back15",
                           @"playPause" ];
       NSMutableArray* forward = [NSMutableArray array];
       for (NSUInteger i = 0; i < cycle.count; i++) {
@@ -390,6 +455,152 @@ int main(int argc, char** argv) {
                                          [after componentsJoinedByString:@" -> "]]);
       }
       timeline = Timeline::OnDemand;
+      Print([NSString stringWithFormat:@"SUMMARY %d failure(s)", failures]);
+    } else if ([mode isEqualToString:@"clicks"]) {
+      [chrome revealControlsSticky:YES];
+      Pump(0.8);
+      WaitUntilSettled(chrome);
+      auto toggledSince = [&](size_t aFrom) {
+        for (size_t i = aFrom; i < host.log.size(); i++) {
+          if (host.log[i] == "toggle-play") {
+            return true;
+          }
+        }
+        return false;
+      };
+      // Double-clicks queued like real input. AppKit grows a window toward the
+      // screen corner when one of its corners is double-clicked; the player
+      // keeps its size, while a double-click on the video toggles playback.
+      for (NSString* corner in @[ @"top-left", @"top-right", @"bottom-left", @"bottom-right" ]) {
+        NSRect before = panel.frame;
+        size_t from = host.log.size();
+        BOOL queued = [chrome testDoubleClick:corner];
+        Pump(1.2);
+        WaitUntilSettled(chrome);
+        NSRect after = panel.frame;
+        check(queued && NSEqualRects(before, after) && !toggledSince(from),
+              [NSString stringWithFormat:@"double-click on the %@ corner changes nothing (%@ -> %@)",
+                                         corner, NSStringFromRect(before), NSStringFromRect(after)]);
+      }
+      {
+        NSRect before = panel.frame;
+        size_t from = host.log.size();
+        [chrome testDoubleClick:@"center"];
+        Pump(0.8);
+        check(toggledSince(from) && NSEqualRects(before, panel.frame),
+              @"double-click on the video still toggles playback");
+        [chrome testDoubleClick:@"center"];
+        Pump(0.8);
+      }
+
+      // The speed button: a gauge whose needle shows the speed, and a menu
+      // with the speeds (the current one checked).
+      auto speed = [&]() { return (NSDictionary*)[chrome debugState][@"speed"]; };
+      auto checkedRates = [&](NSDictionary* aSpeed) {
+        NSMutableArray* rates = [NSMutableArray array];
+        for (NSDictionary* item in aSpeed[@"menu"]) {
+          if ([item[@"checked"] boolValue]) {
+            [rates addObject:item[@"rate"]];
+          }
+        }
+        return rates;
+      };
+      NSDictionary* s1 = speed();
+      NSArray* rates = [s1[@"menu"] valueForKey:@"rate"];
+      check([s1[@"symbol"] isEqualToString:@"gauge.with.dots.needle.50percent"] &&
+                [rates isEqualToArray:@[ @0.5, @0.75, @1, @1.25, @1.5, @1.75, @2 ]] &&
+                [checkedRates(s1) isEqualToArray:@[ @1 ]] &&
+                [s1[@"menuTitle"] isEqualToString:@"Playback speed"],
+            [NSString stringWithFormat:@"speed: gauge at normal speed (%@), menu \"%@\" %@",
+                                       s1[@"symbol"], s1[@"menuTitle"],
+                                       [[s1[@"menu"] valueForKey:@"title"]
+                                           componentsJoinedByString:@" "]]);
+      struct Pick {
+        NSString* name;
+        double rate;
+        NSString* symbol;
+      };
+      for (const Pick& pick : std::vector<Pick>{
+               {@"speed", 1.25, @"gauge.with.dots.needle.67percent"},
+               {@"speed:0.5", 0.5, @"gauge.with.dots.needle.0percent"},
+               {@"speed:0.75", 0.75, @"gauge.with.dots.needle.33percent"},
+               {@"speed:2", 2, @"gauge.with.dots.needle.100percent"},
+               {@"speed:1", 1, @"gauge.with.dots.needle.50percent"},
+           }) {
+        BOOL picked = [chrome testClickControl:pick.name];
+        NSDictionary* s = speed();
+        check(picked && std::abs(host.rate - pick.rate) < 0.001 &&
+                  [s[@"symbol"] isEqualToString:pick.symbol] &&
+                  [checkedRates(s) isEqualToArray:@[ @(pick.rate) ]],
+              [NSString stringWithFormat:@"speed menu %@ -> %g× (%@, %@)", pick.name, host.rate,
+                                         s[@"symbol"], s[@"accessibilityValue"]]);
+      }
+      [chrome setPlaybackRate:1.1];
+      NSDictionary* custom = speed();
+      check([custom[@"menu"] count] == 8 && [checkedRates(custom) isEqualToArray:@[ @1.1 ]] &&
+                [custom[@"symbol"] isEqualToString:@"gauge.with.dots.needle.67percent"],
+            [NSString stringWithFormat:@"a speed the site chose (1.1×) is listed and checked: %@",
+                                       [[custom[@"menu"] valueForKey:@"title"]
+                                           componentsJoinedByString:@" "]]);
+      [chrome testClickControl:@"speed:1"];
+
+      // ZEN_PIP_HARNESS_MENU=<png>: open the real menu from the button and save
+      // it over a plain backdrop (nothing else on screen gets captured).
+      if (const char* menuCapture = getenv("ZEN_PIP_HARNESS_MENU")) {
+        NSRect f = NSIntersectionRect(NSInsetRect(panel.frame, -16, -16), NSInsetRect(panel.screen.frame, 2, 2));
+        NSWindow* backdrop = [[NSWindow alloc] initWithContentRect:f
+                                                         styleMask:NSWindowStyleMaskBorderless
+                                                           backing:NSBackingStoreBuffered
+                                                             defer:NO];
+        backdrop.releasedWhenClosed = NO;
+        backdrop.backgroundColor = [NSColor colorWithWhite:0.16 alpha:1];
+        backdrop.level = panel.level - 1;
+        [backdrop orderFrontRegardless];
+        std::function<NSButton*(NSView*)> find = [&](NSView* aView) -> NSButton* {
+          for (NSView* v in aView.subviews) {
+            if ([v isKindOfClass:[NSButton class]] &&
+                [v.accessibilityLabel isEqualToString:@"Playback speed"]) {
+              return (NSButton*)v;
+            }
+            if (NSButton* b = find(v)) {
+              return b;
+            }
+          }
+          return nil;
+        };
+        NSButton* button = find(panel.contentView);
+        __block NSMenu* opened = nil;
+        id observer = [NSNotificationCenter.defaultCenter
+            addObserverForName:NSMenuDidBeginTrackingNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification* aNote) {
+                      opened = aNote.object;
+                    }];
+        CGFloat mainHeight = NSScreen.screens[0].frame.size.height;
+        NSString* region = [NSString stringWithFormat:@"%.0f,%.0f,%.0f,%.0f", NSMinX(f),
+                                                      mainHeight - NSMaxY(f), f.size.width,
+                                                      f.size.height];
+        NSString* path = @(menuCapture);
+        NSTimer* timer = [NSTimer
+            timerWithTimeInterval:0.9
+                          repeats:NO
+                            block:^(NSTimer*) {
+                              NSTask* task = [NSTask
+                                  launchedTaskWithLaunchPath:@"/usr/sbin/screencapture"
+                                                   arguments:@[ @"-x", @"-R", region, path ]];
+                              [task waitUntilExit];
+                              Print([NSString stringWithFormat:@"MENU capture %@ -> status %d",
+                                                               region, task.terminationStatus]);
+                              [opened cancelTracking];
+                            }];
+        [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
+        [button performClick:nil];  // returns once the menu closes
+        [NSNotificationCenter.defaultCenter removeObserver:observer];
+        check(button && opened && [NSFileManager.defaultManager fileExistsAtPath:path],
+              [NSString stringWithFormat:@"the speed button opens its menu (%@)", path]);
+        [backdrop close];
+      }
       Print([NSString stringWithFormat:@"SUMMARY %d failure(s)", failures]);
     } else if ([mode isEqualToString:@"motion"]) {
       struct Throw {
