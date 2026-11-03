@@ -1,3 +1,14 @@
+# Yab-style PiP update ready — personal.19 (not installed yet)
+
+A personal.19 production candidate is built, notarized (884e4537 Accepted)
+and stapled in `dist/yab-pip-personal.19-production` (as `Zen.app.disabled`;
+rename it back only to install): the gauge speed button with its Playback
+speed menu, back to tab / minimize / close order and the corner double-click
+fix, on a new full-source engine from `ecbcde23`. It installs with
+`Private/Yab Style PiP/Install Ready.py <candidate Zen.app> ecbcde2378455c1ea2dfb455027764dd96b90f54`
+once the owner approves and has quit Zen. Daily Zen is still personal.18.
+Details: [Yab-style PiP](Yab-style%20PiP.md).
+
 # Installed Yab-style PiP update — personal.18
 
 Daily `/Applications/Zen.app` is personal.18 (installed 2026-10-31 20:47 with

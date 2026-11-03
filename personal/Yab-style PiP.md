@@ -58,6 +58,35 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.19 (candidate, not installed yet)
+
+personal.19 = a new full-source engine from `ecbcde23` (gauge speed button
+with its Playback speed menu; back to tab, minimize, close; corner
+double-click fix; built by `build_engine.sh` prepare/optimized/locales/
+package, reusing the October 31 PGO profile: optimized stage 16 min),
+packaged from the same commit. The installed personal.15.3 external-link
+fix carries over unchanged.
+
+- Source checks: 112 Node and 16 Python fork tests; the PiP's 386 geometry
+  checks; native harness layout 156 (every size and timeline kind, top-row
+  order), keys (Tab / Shift-Tab), clicks 12 (queued double-clicks on all
+  corners and the video, the speed menu), motion 39.
+- Browser checks on the Dev candidate (throwaway profile): 40/40, then the
+  rest 59/61; the two misses were a race in the test itself (right after Go
+  to live, YouTube reports no window end for about 2.5 s), fixed in the test
+  and re-run 14/14. One run lost its test tab mid-run (the test window was in
+  front of the owner's work at the time); the same steps re-ran 5/5.
+- Frontend comparison with the installed personal.18: browser/omni.ja
+  identical (13,526 entries); toolkit omni.ja differs only in build metadata
+  (`buildconfig.html`, `AppConstants.sys.mjs`). The change is all native.
+- Production candidate `dist/yab-pip-personal.19-production` (kept as
+  `Zen.app.disabled` and unregistered from Launch Services): Developer ID
+  signed with the installed app's designated requirement; notarization
+  884e4537-a698-45cc-8c0e-b199e536533d Accepted, stapled, Gatekeeper
+  accepted. Stapling and the Gatekeeper check register a bundle even under a
+  `.app.disabled` name, and older disabled copies had been re-registered;
+  all were unregistered so only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+
 ## Verification and installation — personal.18
 
 personal.18 = the personal.17 engine (source `3aa3815b`: Live badge, swapped
