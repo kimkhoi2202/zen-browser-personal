@@ -64,7 +64,7 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## Verification — personal.20 (candidate, not installed yet)
+## Verification and installation — personal.20
 
 personal.20 = a new full-source engine from `69d41d7b` (the chrome resizes
 the player from its whole border, the same however many clicks came before
@@ -99,6 +99,13 @@ the same commit.
   accepted. The personal.19 candidate and the personal.18 rollback copy had
   been re-registered with Launch Services again and were unregistered; only
   `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+- Installed 2026-11-04 17:22 with the owner's approval after they quit Zen:
+  20,752 profile fingerprints unchanged; installed bytes match the
+  candidate; signature, staple and Gatekeeper verified in place; the
+  installed XUL carries the new border handling. http/https still open
+  `com.kimkhoi.zen`, the only registered copy. Rollback: `Previous
+  Zen.app.disabled` (personal.19) and the profile copy in
+  `Backups/Yab Style PiP 2026-11-04 17-22-06`.
 
 ## Verification and installation — personal.19
 
