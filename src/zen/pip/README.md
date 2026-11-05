@@ -76,13 +76,22 @@ native menu headed "Playback speed" with 0.5× to 2× and the current speed
 checked, including a speed the site chose itself (such as 1.1×). VoiceOver
 reads the speed as the button's value.
 
-Double-clicks: on the video they toggle playback. On the resize border (the
-9 pt edges and 18 pt corners, and just outside the window) they do nothing.
-AppKit itself grows a resizable window toward the screen corner when one of
-its corners is double-clicked, before the overlay sees the click, and it
-detects the double-click itself, so the chrome's local event monitor drops
-the second press there with its drags and its release. A single press still
-resizes as usual.
+Resizing: the chrome resizes the player from its whole border itself, the
+9 pt bands along the edges and the 18 pt squares at the corners (also just
+outside the window), keeping a docked corner or edge and the aspect ratio. A
+local event monitor takes every press there before AppKit sees it, together
+with its drags and its release, so a press resizes the same way however many
+clicks came before it: double-click and drag resizes like a single press, a
+double-click alone changes nothing. AppKit would resize from its own areas
+(about 7 pt in near the corners, 13 pt along a corner's diagonal, 3 pt at the
+middle of an edge on macOS 27) with its own anchoring, and grows the window
+toward the screen corner whenever two presses land on a corner within the
+double-click interval: it times them itself and ignores the click count.
+Controls drawn on the border (small players bring the top row and timeline
+within it) still get their presses; the empty corners of their squares
+resize. In the active app a border press makes the player the key window,
+as a press on the video does; a Command-press, or one from another app,
+leaves the key window alone. A double-click on the video toggles playback.
 
 ## Live streams
 
@@ -162,4 +171,7 @@ Off macOS the component is not registered and the stock player is unchanged.
   the attached displays (`build.sh`, then `ZenPipChromeHarness <video> motion`;
   `layout` checks every size with an on-demand, live and live DVR timeline and
   the top-row order; `keys` checks the Tab and Shift-Tab cycle; `clicks`
-  checks double-clicks on the corners and the video, and the speed menu).
+  queues real presses, double-clicks, triple-clicks and drags on every corner
+  and edge (inside AppKit's areas, inside the chrome's band, just outside),
+  on a free and a docked player, a control on the border and the video, and
+  checks the speed menu).

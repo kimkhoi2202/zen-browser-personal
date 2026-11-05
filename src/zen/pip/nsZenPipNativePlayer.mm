@@ -286,8 +286,8 @@ nsZenPipNativeControls::TestKey(uint16_t aKeyCode, const nsACString& aCharacters
 }
 
 NS_IMETHODIMP
-nsZenPipNativeControls::TestDoubleClick(const nsACString& aWhere, bool* aQueued) {
-  *aQueued = [mChrome testDoubleClick:ToNSString(aWhere)];
+nsZenPipNativeControls::TestClicks(const nsACString& aSpec, bool* aQueued) {
+  *aQueued = [mChrome testClicks:ToNSString(aSpec)];
   return NS_OK;
 }
 

@@ -14,8 +14,9 @@
 //   ZenPipChromeHarness <video> motion
 //
 // "layout" (on-demand, live and live DVR timelines), "keys" (Tab order),
-// "clicks" (double-clicks on the corners, the speed menu) and "motion" exit
-// non-zero if any check fails. Video playback is muted.
+// "clicks" (presses, double-clicks and drags on the border and the video,
+// controls on the border, the speed menu) and "motion" exit non-zero if any
+// check fails. Video playback is muted.
 // ZEN_PIP_HARNESS_MENU=<png> in "clicks" also saves the open speed menu.
 
 #import <AVFoundation/AVFoundation.h>
@@ -460,37 +461,187 @@ int main(int argc, char** argv) {
       [chrome revealControlsSticky:YES];
       Pump(0.8);
       WaitUntilSettled(chrome);
-      auto toggledSince = [&](size_t aFrom) {
+      // Real input queued through the normal dispatch (testClicks). A press on
+      // the resize border resizes the player the same way however many clicks
+      // came before it; a double-click there changes nothing (AppKit would
+      // grow the window toward the screen corner); a double-click on the
+      // video toggles playback.
+      auto loggedSince = [&](size_t aFrom, const char* aAction) {
         for (size_t i = aFrom; i < host.log.size(); i++) {
-          if (host.log[i] == "toggle-play") {
+          if (host.log[i] == aAction) {
             return true;
           }
         }
         return false;
       };
-      // Double-clicks queued like real input. AppKit grows a window toward the
-      // screen corner when one of its corners is double-clicked; the player
-      // keeps its size, while a double-click on the video toggles playback.
-      for (NSString* corner in @[ @"top-left", @"top-right", @"bottom-left", @"bottom-right" ]) {
-        NSRect before = panel.frame;
-        size_t from = host.log.size();
-        BOOL queued = [chrome testDoubleClick:corner];
-        Pump(1.2);
+      auto queue = [&](NSString* aSpec) {
+        BOOL queued = [chrome testClicks:aSpec];
+        Pump(1.0);
         WaitUntilSettled(chrome);
-        NSRect after = panel.frame;
-        check(queued && NSEqualRects(before, after) && !toggledSince(from),
-              [NSString stringWithFormat:@"double-click on the %@ corner changes nothing (%@ -> %@)",
-                                         corner, NSStringFromRect(before), NSStringFromRect(after)]);
+        return queued;
+      };
+      auto same = [](NSRect a, NSRect b, CGFloat aTolerance) {
+        return std::abs(NSMinX(a) - NSMinX(b)) <= aTolerance &&
+               std::abs(NSMinY(a) - NSMinY(b)) <= aTolerance &&
+               std::abs(NSMaxX(a) - NSMaxX(b)) <= aTolerance &&
+               std::abs(NSMaxY(a) - NSMaxY(b)) <= aTolerance;
+      };
+      auto rectOf = [](NSArray* r) {
+        return NSMakeRect([r[0] doubleValue], [r[1] doubleValue], [r[2] doubleValue],
+                          [r[3] doubleValue]);
+      };
+      NSRect allowed = rectOf([chrome debugState][@"allowedArea"]);
+      auto place = [&](NSRect aFrame) {
+        [panel setFrame:aFrame display:YES];
+        panel.contentAspectRatio = aFrame.size;
+        Pump(0.3);
+        WaitUntilSettled(chrome);
+        return panel.frame;
+      };
+      struct Handle {
+        NSString* place;
+        NSPoint drag;  // outward
+        int sx, sy;    // which sides it moves when the player is free
+      };
+      const std::vector<Handle> handles = {
+          {@"top-left", {-30, 30}, -1, 1},     {@"top-right", {30, 30}, 1, 1},
+          {@"bottom-left", {-30, -30}, -1, -1}, {@"bottom-right", {30, -30}, 1, -1},
+          {@"left", {-30, 0}, -1, 0},           {@"right", {30, 0}, 1, 0},
+          {@"top", {0, 30}, 0, 1},              {@"bottom", {0, -30}, 0, -1},
+      };
+      // A free player (well away from the edges) keeps the side opposite the
+      // handle; one in a corner keeps that corner (the requirements).
+      NSRect freeFrame = NSMakeRect(NSMaxX(allowed) - 480 - 110, NSMinY(allowed) + 110, 480, 270);
+      NSRect dockedFrame = NSMakeRect(NSMaxX(allowed) - 480, NSMinY(allowed), 480, 270);
+      for (bool docked : {false, true}) {
+        NSString* where = docked ? @"docked bottom-right" : @"free";
+        for (const Handle& h : handles) {
+          // Corners 4 pt in are inside AppKit's own corner area; edges 4 pt in
+          // are only inside the chrome's band. Also 1 pt in (AppKit's edge
+          // area) and 2 pt outside the window for the edges, and 12 pt in
+          // (the inner part of the corner square) for the bottom corners; at
+          // the top that is on the speed and close buttons.
+          bool corner = h.sx != 0 && h.sy != 0;
+          NSArray* insets = !corner      ? @[ @"4", @"1", @"-2" ]
+                            : h.sy < 0 ? @[ @"4", @"12" ]
+                                       : @[ @"4" ];
+          for (NSString* inset in insets) {
+            NSRect start = place(docked ? dockedFrame : freeFrame);
+            NSRect frames[3];
+            bool queued = true;
+            size_t from = host.log.size();
+            for (int clicks = 1; clicks <= 3; clicks++) {
+              place(start);
+              queued &= queue([NSString stringWithFormat:@"%@ inset=%@ clicks=%d drag=%g,%g",
+                                                         h.place, inset, clicks, h.drag.x,
+                                                         h.drag.y]);
+              frames[clicks - 1] = panel.frame;
+            }
+            NSRect f = frames[0];
+            bool resized = f.size.width > start.size.width + 20;
+            bool aspect = std::abs(f.size.width / f.size.height -
+                                   start.size.width / start.size.height) < 0.01;
+            bool anchored;
+            // Window frames are whole points, so a centered side can be half
+            // a point off.
+            if (docked) {
+              anchored = std::abs(NSMaxX(f) - NSMaxX(start)) <= 1 &&
+                         std::abs(NSMinY(f) - NSMinY(start)) <= 1;
+            } else {
+              auto keeps = [&](int aSign, CGFloat aMin, CGFloat aMax, CGFloat aMid, CGFloat aMinS,
+                               CGFloat aMaxS, CGFloat aMidS) {
+                return aSign > 0   ? std::abs(aMin - aMinS) <= 1
+                       : aSign < 0 ? std::abs(aMax - aMaxS) <= 1
+                                   : std::abs(aMid - aMidS) <= 1;
+              };
+              anchored = keeps(h.sx, NSMinX(f), NSMaxX(f), NSMidX(f), NSMinX(start),
+                               NSMaxX(start), NSMidX(start)) &&
+                         keeps(h.sy, NSMinY(f), NSMaxY(f), NSMidY(f), NSMinY(start),
+                               NSMaxY(start), NSMidY(start));
+            }
+            bool inside = NSContainsRect(NSInsetRect(allowed, -0.5, -0.5), f);
+            bool sameForAll = same(frames[0], frames[1], 0.01) && same(frames[0], frames[2], 0.01);
+            check(queued && resized && aspect && anchored && inside && sameForAll &&
+                      !loggedSince(from, "toggle-play"),
+                  [NSString stringWithFormat:@"%@: %@ (%@ pt in) press, double-click and "
+                                             @"triple-click + drag resize alike %@ -> %@%@%@%@",
+                                             where, h.place, inset, NSStringFromSize(start.size),
+                                             NSStringFromRect(f), anchored ? @"" : @" NOT ANCHORED",
+                                             inside ? @"" : @" OUTSIDE",
+                                             sameForAll ? @""
+                                                        : [NSString stringWithFormat:@" DIFFER %@ %@",
+                                                                                     NSStringFromRect(frames[1]),
+                                                                                     NSStringFromRect(frames[2])]]);
+          }
+        }
+        // Double-clicks without a drag change nothing, also two quick presses
+        // on a corner (AppKit times those itself).
+        for (NSString* spec : @[ @"top-left clicks=2", @"top-right clicks=2", @"bottom-left clicks=2",
+                                 @"bottom-right clicks=2", @"bottom-right inset=12 clicks=2",
+                                 @"top-left inset=1 clicks=3", @"right inset=1 clicks=2",
+                                 @"top inset=-2 clicks=2" ]) {
+          NSRect start = place(docked ? dockedFrame : freeFrame);
+          size_t from = host.log.size();
+          BOOL queued = queue(spec);
+          NSRect after = panel.frame;
+          check(queued && NSEqualRects(start, after) && !loggedSince(from, "toggle-play"),
+                [NSString stringWithFormat:@"%@: \"%@\" changes nothing (%@ -> %@)", where, spec,
+                                           NSStringFromRect(start), NSStringFromRect(after)]);
+        }
       }
       {
-        NSRect before = panel.frame;
+        // 12 pt in from the top right is on the close button, inside the
+        // corner square: the press goes to the button.
+        NSRect start = place(freeFrame);
         size_t from = host.log.size();
-        [chrome testDoubleClick:@"center"];
-        Pump(0.8);
-        check(toggledSince(from) && NSEqualRects(before, panel.frame),
-              @"double-click on the video still toggles playback");
-        [chrome testDoubleClick:@"center"];
-        Pump(0.8);
+        BOOL queued = queue(@"top-right inset=12");
+        check(queued && loggedSince(from, "close") && NSEqualRects(start, panel.frame),
+              @"a press on the close button inside the corner square closes, no resize");
+      }
+      {
+        // On the video itself: the center holds play/pause while the controls
+        // show. Exactly one toggle (two would be clicks on that button).
+        NSRect start = place(freeFrame);
+        NSString* onVideo = [NSString stringWithFormat:@"%g,%g clicks=2", round(start.size.width * 0.2),
+                                                       round(start.size.height * 0.5)];
+        size_t from = host.log.size();
+        queue(onVideo);
+        size_t toggles = 0;
+        for (size_t i = from; i < host.log.size(); i++) {
+          toggles += host.log[i] == "toggle-play";
+        }
+        check(toggles == 1 && NSEqualRects(start, panel.frame),
+              [NSString stringWithFormat:@"double-click on the video (%@) toggles playback once", onVideo]);
+        queue(onVideo);
+      }
+      // A small player brings the controls into the resize border: a press on
+      // a drawn control still reaches it, the empty corner of its square
+      // resizes.
+      {
+        NSRect start = place(NSMakeRect(NSMinX(freeFrame), NSMinY(freeFrame), 240, 135));
+        NSDictionary* close = nil;
+        for (NSDictionary* c in [chrome debugState][@"controls"]) {
+          if ([c[@"name"] isEqualToString:@"close"]) {
+            close = c;
+          }
+        }
+        NSRect box = rectOf(close[@"frame"]);
+        CGFloat fromTop = start.size.height - (NSMaxY(box) - 1);
+        size_t from = host.log.size();
+        BOOL queued = queue([NSString stringWithFormat:@"%g,%g", NSMidX(box), NSMaxY(box) - 1]);
+        check(queued && fromTop < 9 && loggedSince(from, "close") && NSEqualRects(start, panel.frame),
+              [NSString stringWithFormat:@"a press on the close button %.0f pt from the top edge "
+                                         @"closes, no resize",
+                                         fromTop]);
+        start = place(start);
+        from = host.log.size();
+        queued = queue([NSString stringWithFormat:@"%g,%g clicks=2 drag=20,20", NSMaxX(box) - 1,
+                                                  NSMaxY(box) - 1]);
+        check(queued && !loggedSince(from, "close") && panel.frame.size.width > start.size.width + 10,
+              [NSString stringWithFormat:@"a double-click + drag on the empty corner of its square "
+                                         @"resizes (%@ -> %@)",
+                                         NSStringFromSize(start.size), NSStringFromSize(panel.frame.size)]);
+        place(freeFrame);
       }
 
       // The speed button: a gauge whose needle shows the speed, and a menu

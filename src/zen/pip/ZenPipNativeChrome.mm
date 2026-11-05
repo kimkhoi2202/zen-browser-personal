@@ -36,6 +36,9 @@ namespace {
 // Reference player width at which the controls use their nominal sizes; they
 // scale between 72% and 118% of that, never below usable hit targets.
 constexpr CGFloat kReferenceWidth = 640;
+// The resize border: 9 pt bands along the edges and 18 pt squares at the
+// corners. It covers AppKit's own resize areas (up to about 7 pt in from the
+// edges near the corners and 13 pt in along a corner's diagonal on macOS 27).
 constexpr CGFloat kResizeBand = 9;
 constexpr CGFloat kResizeCornerBand = 18;
 constexpr CGFloat kDragThreshold = 3;
@@ -85,6 +88,20 @@ Appearance CurrentAppearance() {
 
 Box ToRect(NSRect aRect) {
   return {aRect.origin.x, aRect.origin.y, aRect.size.width, aRect.size.height};
+}
+
+// Where the pointer was for a mouse event, in screen coordinates. Taken from
+// the event's global location rather than its window location, because the
+// player may have moved or resized since the window location was computed.
+NSPoint EventScreenLocation(NSEvent* aEvent) {
+  CGEventRef event = aEvent.CGEvent;
+  NSScreen* primary = NSScreen.screens.firstObject;
+  if (!event || !primary) {
+    return NSEvent.mouseLocation;
+  }
+  // Quartz puts the origin at the top left of the primary display.
+  CGPoint p = CGEventGetLocation(event);
+  return NSMakePoint(p.x, NSMaxY(primary.frame) - p.y);
 }
 
 CGDirectDisplayID DisplayID(NSScreen* aScreen) {
@@ -785,9 +802,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   ZenPipTimeline* mTimeline;
   ZenPipTuckPanel* mTuckPanel;
   NSString* mSpeedSymbol;  // as last drawn
-  // Drops double-clicks on the window's resize border (see init).
+  // Takes every press on the resize border (see init).
   id mClickMonitor;
-  BOOL mSwallowingPress;  // the rest of a dropped press: drags, release
+  BOOL mOwnsBorderPress;  // its drags and its release come here too
 
   // Playback state mirrored from the original video.
   BOOL mPlaying;
@@ -890,10 +907,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mPreviousFirstResponder = aWindow.firstResponder;
   [aWindow makeFirstResponder:mOverlay];
 
-  // AppKit grows a window toward the screen corner when one of its corners
-  // is double-clicked, before the overlay sees the click. The player's size
-  // only changes by dragging, so on the resize border the second press of a
-  // double-click never reaches the window.
+  // The chrome resizes the player from its whole border itself, so presses
+  // there never reach AppKit. AppKit would resize from its own edge and
+  // corner areas with its own anchoring, and it grows the window toward the
+  // screen corner whenever two presses land on a corner within the
+  // double-click interval (it times them itself; the click count is ignored).
   __weak ZenPipPlayerChrome* weakChrome = self;
   mClickMonitor = [NSEvent
       addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown |
@@ -901,8 +919,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                            NSEventMaskLeftMouseUp
                                    handler:^NSEvent*(NSEvent* aEvent) {
                                      ZenPipPlayerChrome* chrome = weakChrome;
-                                     return chrome ? [chrome filterResizeBorderPress:aEvent]
-                                                   : aEvent;
+                                     return chrome ? [chrome filterBorderPress:aEvent] : aEvent;
                                    }];
 
   [self observeNotifications];
@@ -2161,6 +2178,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 #pragma mark Pointer gestures
 
+// The resize handle at a point in overlay coordinates: the resize border (see
+// kResizeBand), including just outside the window, except where a control is
+// drawn on it.
 - (nullable NSNumber*)resizeHandleAt:(NSPoint)aPoint {
   NSSize size = mOverlay.bounds.size;
   if (size.width < 120 || size.height < 80) {
@@ -2170,47 +2190,85 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL bottom = aPoint.y < kResizeBand, top = aPoint.y > size.height - kResizeBand;
   BOOL cLeft = aPoint.x < kResizeCornerBand, cRight = aPoint.x > size.width - kResizeCornerBand;
   BOOL cBottom = aPoint.y < kResizeCornerBand, cTop = aPoint.y > size.height - kResizeCornerBand;
-  if ((left || bottom) && cLeft && cBottom) return @((int)ResizeHandle::BottomLeft);
-  if ((right || bottom) && cRight && cBottom) return @((int)ResizeHandle::BottomRight);
-  if ((left || top) && cLeft && cTop) return @((int)ResizeHandle::TopLeft);
-  if ((right || top) && cRight && cTop) return @((int)ResizeHandle::TopRight);
+  BOOL corner = (cLeft || cRight) && (cBottom || cTop);
+  if (!(left || right || bottom || top || corner) || [self controlDrawnAt:aPoint]) {
+    return nil;
+  }
+  if (cLeft && cBottom) return @((int)ResizeHandle::BottomLeft);
+  if (cRight && cBottom) return @((int)ResizeHandle::BottomRight);
+  if (cLeft && cTop) return @((int)ResizeHandle::TopLeft);
+  if (cRight && cTop) return @((int)ResizeHandle::TopRight);
   if (left) return @((int)ResizeHandle::Left);
   if (right) return @((int)ResizeHandle::Right);
   if (bottom) return @((int)ResizeHandle::Bottom);
-  if (top) return @((int)ResizeHandle::Top);
-  return nil;
+  return @((int)ResizeHandle::Top);
 }
 
-// The local event monitor's filter (see init). The second (or later) press
-// of a multi-click on the resize border (edges and corners, where AppKit
-// resizes; just outside the window too) is dropped with its drags and its
-// release. AppKit detects the double-click itself, so passing the press on
-// with a click count of 1 would not stop it.
-- (nullable NSEvent*)filterResizeBorderPress:(NSEvent*)aEvent {
+// Whether a control is drawn at a point in overlay coordinates: inside a
+// button's circle or capsule or the slider's track, not merely inside the
+// rectangle around it. Small players bring the controls within the resize
+// border; their empty corners still resize.
+- (BOOL)controlDrawnAt:(NSPoint)aPoint {
+  NSView* parent = mOverlay.superview;
+  if (!parent) {
+    return NO;
+  }
+  NSView* control = [mOverlay hitTest:[mOverlay convertPoint:aPoint toView:parent]];
+  while (control && control != mOverlay && ![control isKindOfClass:[NSButton class]] &&
+         ![control isKindOfClass:[NSSlider class]]) {
+    control = control.superview;
+  }
+  if (!control || control == mOverlay) {
+    return NO;
+  }
+  NSRect r = [mOverlay convertRect:control.bounds fromView:control];
+  CGFloat radius = std::min(r.size.width, r.size.height) / 2;
+  return [[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius]
+      containsPoint:aPoint];
+}
+
+// The local event monitor's filter (see init). A press on the resize border
+// starts the chrome's own resize, the same however many clicks came before
+// it, and its drags and its release go there too; AppKit sees none of them.
+// Presses elsewhere, and on controls drawn on the border, pass through.
+- (nullable NSEvent*)filterBorderPress:(NSEvent*)aEvent {
   if (aEvent.type != NSEventTypeLeftMouseDown) {
-    if (!mSwallowingPress) {
+    if (!mOwnsBorderPress) {
       return aEvent;
     }
+    NSPoint pointer = EventScreenLocation(aEvent);
     if (aEvent.type == NSEventTypeLeftMouseUp) {
-      mSwallowingPress = NO;
+      mOwnsBorderPress = NO;
+      [self gestureEndedAt:pointer time:aEvent.timestamp clickCount:0];
+    } else {
+      [self gestureMovedTo:pointer time:aEvent.timestamp];
     }
     return nil;
   }
-  mSwallowingPress = NO;
+  mOwnsBorderPress = NO;
   NSWindow* window = mWindow;
-  if (mInvalidated || !window || aEvent.window != window || aEvent.clickCount < 2) {
+  if (mInvalidated || !window || aEvent.window != window) {
     return aEvent;
   }
-  NSPoint p = aEvent.locationInWindow;
-  NSSize size = window.frame.size;
-  CGFloat dx = std::min(p.x, size.width - p.x);
-  CGFloat dy = std::min(p.y, size.height - p.y);
-  BOOL border = dx < kResizeBand || dy < kResizeBand ||
-                (dx < kResizeCornerBand && dy < kResizeCornerBand);
-  if (!border) {
+  NSNumber* handle =
+      [self resizeHandleAt:[mOverlay convertPoint:aEvent.locationInWindow fromView:nil]];
+  if (!handle) {
     return aEvent;
   }
-  mSwallowingPress = YES;
+  mOwnsBorderPress = YES;
+  // In the active app a press makes the player the key window, as the window
+  // itself would have; a Command-press resizes without that, as AppKit does.
+  // Resizing from another app leaves the key window alone.
+  if (NSApp.isActive && !window.isKeyWindow && window.canBecomeKeyWindow &&
+      !(aEvent.modifierFlags & NSEventModifierFlagCommand)) {
+    [window makeKeyWindow];
+  }
+  [window makeFirstResponder:mOverlay];
+  [self beginGestureAt:EventScreenLocation(aEvent) time:aEvent.timestamp];
+  mGesture = ZenPipGestureResize;
+  mResizeHandle = (ResizeHandle)handle.intValue;
+  [[self cursorForHandle:mResizeHandle] set];
+  [self noteActivity];
   return nil;
 }
 
@@ -2243,6 +2301,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)overlayUpdateCursor:(NSEvent*)aEvent {
+  if (mGesture == ZenPipGestureResize) {
+    [[self cursorForHandle:mResizeHandle] set];
+    return;
+  }
   NSPoint p = [mOverlay convertPoint:aEvent.locationInWindow fromView:nil];
   NSNumber* handle = [self resizeHandleAt:p];
   if (handle) {
@@ -2780,43 +2842,119 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [window sendEvent:event];
 }
 
-- (BOOL)testDoubleClick:(NSString*)aWhere {
+- (BOOL)testClicks:(NSString*)aSpec {
   NSWindow* window = mWindow;
   if (!window) {
     return NO;
   }
-  // 4 pt inside a corner is inside AppKit's own corner resize area.
+  NSMutableArray<NSString*>* words = [NSMutableArray array];
+  for (NSString* word in [aSpec componentsSeparatedByString:@" "]) {
+    if (word.length) {
+      [words addObject:word];
+    }
+  }
+  NSInteger clicks = 1;
+  CGFloat inset = 4;
+  NSPoint drag = NSZeroPoint;
+  for (NSUInteger i = 1; i < words.count; i++) {
+    NSArray<NSString*>* pair = [words[i] componentsSeparatedByString:@"="];
+    if (pair.count != 2) {
+      return NO;
+    }
+    if ([pair[0] isEqualToString:@"clicks"]) {
+      clicks = pair[1].integerValue;
+    } else if ([pair[0] isEqualToString:@"inset"]) {
+      inset = pair[1].doubleValue;
+    } else if ([pair[0] isEqualToString:@"drag"]) {
+      NSArray<NSString*>* xy = [pair[1] componentsSeparatedByString:@","];
+      if (xy.count != 2) {
+        return NO;
+      }
+      drag = NSMakePoint(xy[0].doubleValue, xy[1].doubleValue);
+    } else {
+      return NO;
+    }
+  }
   NSSize size = window.frame.size;
-  NSDictionary<NSString*, NSValue*>* points = @{
-    @"top-left" : [NSValue valueWithPoint:NSMakePoint(4, size.height - 4)],
-    @"top-right" : [NSValue valueWithPoint:NSMakePoint(size.width - 4, size.height - 4)],
-    @"bottom-left" : [NSValue valueWithPoint:NSMakePoint(4, 4)],
-    @"bottom-right" : [NSValue valueWithPoint:NSMakePoint(size.width - 4, 4)],
-    @"center" : [NSValue valueWithPoint:NSMakePoint(size.width / 2, size.height / 2)],
+  CGFloat l = inset, r = size.width - inset, b = inset, t = size.height - inset;
+  CGFloat mx = size.width / 2, my = size.height / 2;
+  NSDictionary<NSString*, NSValue*>* places = @{
+    @"top-left" : [NSValue valueWithPoint:NSMakePoint(l, t)],
+    @"top-right" : [NSValue valueWithPoint:NSMakePoint(r, t)],
+    @"bottom-left" : [NSValue valueWithPoint:NSMakePoint(l, b)],
+    @"bottom-right" : [NSValue valueWithPoint:NSMakePoint(r, b)],
+    @"left" : [NSValue valueWithPoint:NSMakePoint(l, my)],
+    @"right" : [NSValue valueWithPoint:NSMakePoint(r, my)],
+    @"top" : [NSValue valueWithPoint:NSMakePoint(mx, t)],
+    @"bottom" : [NSValue valueWithPoint:NSMakePoint(mx, b)],
+    @"center" : [NSValue valueWithPoint:NSMakePoint(mx, my)],
   };
-  NSValue* point = points[aWhere];
-  if (!point) {
+  NSValue* place = words.count ? places[words[0]] : nil;
+  NSArray<NSString*>* xy = words.count ? [words[0] componentsSeparatedByString:@","] : @[];
+  if (!place && xy.count == 2) {
+    place = [NSValue valueWithPoint:NSMakePoint(xy[0].doubleValue, xy[1].doubleValue)];
+  }
+  if (!place || clicks < 1 || clicks > 4) {
     return NO;
   }
-  // Queued like real input: the events pass through the application's event
-  // dispatch (and its event monitors) and AppKit's own tracking loops.
-  NSTimeInterval t = NSProcessInfo.processInfo.systemUptime;
-  for (NSInteger click = 1; click <= 2; click++) {
-    for (NSEventType type : {NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp}) {
-      NSEvent* event = [NSEvent mouseEventWithType:type
-                                          location:point.pointValue
-                                     modifierFlags:0
-                                         timestamp:t
-                                      windowNumber:window.windowNumber
-                                           context:nil
-                                       eventNumber:0
-                                        clickCount:click
-                                          pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
-      [NSApp postEvent:event atStart:NO];
-      t += 0.04;
+
+  // The presses 0.12 s apart (well within the double-click interval), the
+  // last one dragged in 12 steps, all at screen positions.
+  struct Step {
+    NSEventType type;
+    NSPoint screen;
+    NSInteger count;
+    NSTimeInterval at;
+  };
+  __block std::vector<Step> steps;
+  NSPoint start = [window convertPointToScreen:place.pointValue];
+  NSTimeInterval at = 0;
+  for (NSInteger click = 1; click <= clicks; click++) {
+    steps.push_back({NSEventTypeLeftMouseDown, start, click, at});
+    NSPoint end = start;
+    if (click == clicks && (drag.x != 0 || drag.y != 0)) {
+      constexpr int kDragSteps = 12;
+      for (int i = 1; i <= kDragSteps; i++) {
+        end = NSMakePoint(start.x + drag.x * i / kDragSteps, start.y + drag.y * i / kDragSteps);
+        steps.push_back({NSEventTypeLeftMouseDragged, end, click, at + 0.03 + 0.012 * i});
+      }
+      at += 0.03 + 0.012 * kDragSteps;
     }
-    t += 0.08;
+    steps.push_back({NSEventTypeLeftMouseUp, end, click, at + 0.04});
+    at += 0.12;
   }
+  // Posted one at a time, like real input arriving, each located from the
+  // window's frame at that moment (the player may already have moved or
+  // resized under the pointer). They pass through the application's normal
+  // dispatch, its event monitors and AppKit's own tracking loops.
+  __weak NSWindow* weakWindow = window;
+  NSTimeInterval t0 = NSProcessInfo.processInfo.systemUptime;
+  __block size_t next = 0;
+  NSTimer* timer = [NSTimer
+      timerWithTimeInterval:1.0 / 240
+                    repeats:YES
+                      block:^(NSTimer* aTimer) {
+                        NSWindow* w = weakWindow;
+                        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+                        if (w && next < steps.size() && steps[next].at <= now - t0) {
+                          const Step& s = steps[next++];
+                          NSEvent* event = [NSEvent
+                              mouseEventWithType:s.type
+                                        location:[w convertPointFromScreen:s.screen]
+                                   modifierFlags:0
+                                       timestamp:now
+                                    windowNumber:w.windowNumber
+                                         context:nil
+                                     eventNumber:0
+                                      clickCount:s.count
+                                        pressure:s.type == NSEventTypeLeftMouseUp ? 0 : 1];
+                          [NSApp postEvent:event atStart:NO];
+                        }
+                        if (!w || next >= steps.size()) {
+                          [aTimer invalidate];
+                        }
+                      }];
+  [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
   return YES;
 }
 
