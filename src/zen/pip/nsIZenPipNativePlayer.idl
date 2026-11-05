@@ -68,10 +68,12 @@ interface nsIZenPipNativeControls : nsISupports {
    *  through the player window's normal event dispatch. */
   void testKey(in unsigned short keyCode, in AUTF8String characters,
                in unsigned long modifiers);
-  /** Queues a real double-click 4 pt inside a corner ("top-left",
-   *  "top-right", "bottom-left", "bottom-right") or at the "center", through
-   *  the application's normal event dispatch. False for an unknown place. */
-  boolean testDoubleClick(in ACString where);
+  /** Queues real mouse input through the application's normal event
+   *  dispatch: "<place> [clicks=<n>] [drag=<dx>,<dy>] [inset=<pt>]", n quick
+   *  presses at a corner, the middle of an edge or the "center", the last one
+   *  dragged by (dx, dy) points (see ZenPipNativeChrome.h). False for a
+   *  malformed spec. */
+  boolean testClicks(in ACString spec);
 
   /** Removes the native chrome. Idempotent; also happens on window close. */
   void destroy();

@@ -105,10 +105,15 @@ class ChromeHost {
               duration:(NSTimeInterval)aDuration
      restBeforeRelease:(NSTimeInterval)aRest;
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta;
-// Queues a real double-click (two down/up pairs) 4 pt inside a corner
-// ("top-left", "top-right", "bottom-left", "bottom-right") or at the
-// "center", through the application's normal event dispatch.
-- (BOOL)testDoubleClick:(NSString*)aWhere;
+// Queues real mouse input through the application's normal event dispatch:
+//   "<place> [clicks=<n>] [drag=<dx>,<dy>] [inset=<pt>]"
+// that is n presses (1 to 4, default 1) in quick succession at a place, the
+// last one dragged by (dx, dy) screen points if given. Places: "top-left",
+// "top-right", "bottom-left", "bottom-right" (inset pt in from both edges,
+// default 4; negative is outside), "left", "right", "top", "bottom" (the
+// middle of that edge, inset pt in), "center", or "<x>,<y>" in window
+// coordinates. NO for a malformed spec.
+- (BOOL)testClicks:(NSString*)aSpec;
 // Two-finger carry: synthesized continuous scroll events (began, changed,
 // ended) through the real scroll handler; `aDelta` is the finger travel.
 - (void)testCarryBy:(NSPoint)aDelta;
