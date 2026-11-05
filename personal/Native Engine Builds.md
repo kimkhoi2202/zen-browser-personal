@@ -53,6 +53,11 @@ The build is arm64 only and runs natively on Apple Silicon.
       --base ~/Developer/Zen-Personal-PiP-Build.noindex/zen-desktop/engine/obj-aarch64-apple-darwin/dist/zen/Zen.app \
       --channel production --identity 'Developer ID Application: Your Name (TEAMID)' --output dist/NAME
 
+`--identity` is passed to codesign as is: when the keychain holds more than
+one certificate with that name (as after a certificate renewal), codesign
+calls it ambiguous; pass the SHA-1 fingerprint of the one that signed the
+installed app instead (`security find-identity -v -p codesigning`).
+
 The builder applies the same frontend overlays, identity, launcher, update
 policy and signing as for the official engine. It refuses a source-built
 engine whose compiled sources differ from the packaging checkout: only

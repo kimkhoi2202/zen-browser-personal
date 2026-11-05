@@ -64,6 +64,42 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.20 (candidate, not installed yet)
+
+personal.20 = a new full-source engine from `69d41d7b` (the chrome resizes
+the player from its whole border, the same however many clicks came before
+the press; built by `build_engine.sh` prepare/optimized/locales/package,
+reusing the October 31 PGO profile: optimized stage 15 min), packaged from
+the same commit.
+
+- Source checks: 112 Node and 16 Python fork tests; the PiP's 386 geometry
+  checks; native harness clicks 63 (press, double-click and triple-click +
+  drag on every corner and edge, inside AppKit's own resize areas, inside
+  the chrome's band and just outside, on a free and a docked player;
+  double-clicks alone; controls on the border; the video), layout 156, keys
+  (Tab / Shift-Tab), motion 39.
+- Browser checks on the Dev candidate (throwaway profile, every group except
+  YouTube): 81/83; the two misses (an automatic player closed on purpose,
+  then automatic PiP again) re-ran 8/8. In the release engine, press,
+  double-click and triple-click + drag on each corner resize to the same
+  frame and keep the docked corner; double-clicks alone leave the player as
+  it was.
+- Frontend comparison with the installed personal.19: browser/omni.ja
+  identical (13,526 entries); toolkit omni.ja differs only in build metadata
+  (`buildconfig.html`, `AppConstants.sys.mjs`). The change is all native.
+- Signing: the login keychain now holds two "Developer ID Application: Kim
+  Khoi Lam (U2PAUM72WT)" certificates (the second issued 2026-11-03 22:29
+  UTC), so codesign finds the name ambiguous. The candidates are signed by
+  fingerprint with the installed app's certificate
+  (`C30023C18D0E672B1335F817756776C59554A78D`, valid until 2027-02-01) and
+  satisfy the installed app's designated requirement.
+- Production candidate `dist/yab-pip-personal.20-production` (kept as
+  `Zen.app.disabled`, unregistered from Launch Services): notarization
+  ca6d0fde-f373-40fc-b2ce-b1c3ec70b733 Accepted, stapled, Gatekeeper
+  accepted. The personal.19 candidate and the personal.18 rollback copy had
+  been re-registered with Launch Services again and were unregistered; only
+  `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+
 ## Verification and installation — personal.19
 
 personal.19 = a new full-source engine from `ecbcde23` (gauge speed button
