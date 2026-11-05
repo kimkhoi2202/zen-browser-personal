@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (13 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (14 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -22,10 +22,14 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   leaning left when slower, right when faster); it drops down a native
   "Playback speed" menu with the current speed checked (personal.19; it
   showed "1×" as text before).
-- Double-clicking a corner of the player does nothing: AppKit would grow the
-  window toward the screen corner, so the chrome drops the second press on
-  the resize border. A double-click on the video toggles playback
-  (personal.19).
+- The chrome resizes the player from its whole border itself (the edges,
+  the corners and just outside the window), so a press there resizes the
+  same way however many clicks came before it and keeps the docked corner:
+  double-click and drag resizes like a single press, a double-click alone
+  does nothing (AppKit would grow the window toward the screen corner).
+  Controls drawn near the edge still get their presses; a double-click on
+  the video toggles playback (personal.20; personal.19 dropped the second
+  press of a double-click on the border, so dragging after it did nothing).
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
   two-finger carry, corner-anchored resize, always inside the usable area of
   the source window's display and following that window. Holding it at an
