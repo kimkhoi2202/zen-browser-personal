@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (14 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (15 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -18,10 +18,13 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   right, close in the corner (sides swapped in personal.18, that order in
   personal.19, both at the owner's request); ±15 s and play/pause centered;
   glass timeline. Tab, Shift-Tab and VoiceOver follow the same order.
-- The speed button is a glass gauge whose needle shows the speed (up at 1×,
-  leaning left when slower, right when faster); it drops down a native
-  "Playback speed" menu with the current speed checked (personal.19; it
-  showed "1×" as text before).
+- The speed button shows the speed ("1×", "1.5×"; a capsule for longer
+  numbers) and drops down a native "Playback speed" menu with the current
+  speed checked (personal.21; personal.19–20 showed a gauge). The play button
+  shows a spinner while buffering and a replay symbol at the end, the sound
+  button fills with the volume, and the timeline is a thin track with the
+  loaded range and a knob on hover. The corners are concentric with the
+  controls in them; "Subtitles" wording.
 - The chrome resizes the player from its whole border itself (the edges,
   the corners and just outside the window), so a press there resizes the
   same way however many clicks came before it and keeps the docked corner:
@@ -30,11 +33,24 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   Controls drawn near the edge still get their presses; a double-click on
   the video toggles playback (personal.20; personal.19 dropped the second
   press of a double-click on the border, so dragging after it did nothing).
+  Since personal.21 every press outside the controls goes through the
+  chrome: dragging or resizing never takes the keyboard, only a click does.
+  Command shortcuts the player doesn't use (⌘Q, ⌘H, ⌘,) run the menu bar's
+  items; ⌘M stashes the player; it stays on screen when Zen is hidden.
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
   two-finger carry, corner-anchored resize, always inside the usable area of
   the source window's display and following that window. Holding it at an
-  edge shared with another display for about 0.2 s moves it there.
-- Minimize tucks the player into a glass pill at the screen edge.
+  edge shared with another display for about 0.2 s moves it there. Since
+  personal.21: a trackpad tick at the edge; throws avoid corners other
+  players take; it re-docks when the Dock or menu bar changes and returns
+  after window managers move it; a new player grows out of the video, Back
+  to tab shrinks it back in, closing fades it out.
+- Minimize (or pushing the player well past a side) stashes it into the side
+  of its display, leaving a glass tab that brings it back and can be dragged
+  along the edge (personal.21; a pill at the edge before).
+- Stuck players fixed (personal.21): closing a playing tab used to leave a
+  black player with dead stock controls that couldn't be closed (upstream
+  Zen #11881).
 - Captions use System Settings > Accessibility > Captions.
 - Live streams show a glass Live badge at the bottom left (known glitch: for
   2–3 s after Go to live, while YouTube buffers and reports no window end,
@@ -48,7 +64,7 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 - Arc-style automatic PiP: a playing, audible video pops out when its tab or
   Space is left and returns inline when it is selected again
   (`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
-  now defaults to true). Tunables are the `zen.pip.*` prefs in
+  now defaults to true). Settings are the `zen.pip.*` prefs in
   `prefs/zen/pip.yaml`; `zen.pip.native-controls.enabled=false` restores the
   stock player.
 
