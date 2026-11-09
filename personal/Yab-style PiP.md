@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (15 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (16 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -24,7 +24,8 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   shows a spinner while buffering and a replay symbol at the end, the sound
   button fills with the volume, and the timeline is a thin track with the
   loaded range and a knob on hover. The corners are concentric with the
-  controls in them; "Subtitles" wording.
+  controls in them; "Subtitles" wording. Since personal.22 they stay clear at
+  every size (personal.21 could show white slivers in small players' corners).
 - The chrome resizes the player from its whole border itself (the edges,
   the corners and just outside the window), so a press there resizes the
   same way however many clicks came before it and keeps the docked corner:
