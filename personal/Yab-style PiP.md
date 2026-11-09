@@ -81,6 +81,34 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.22 (candidate, not installed yet)
+
+personal.22 = a new full-source engine from `8a2adb28` (round 9 of the
+independent project: the PiP window stays transparent around its rounded
+corners, so small players no longer show white slivers there; built by
+`build_engine.sh` prepare/optimized/locales/package reusing the October 31
+PGO profile: optimized stage 16.4 min), packaged from the same commit.
+
+- Source checks: the new round 9 browser group failed on the personal.21
+  code exactly as reported (white corner pixels at the smallest size) and
+  passes on the fix; a 2.55:1 video gets a 2.55:1 player at every size and
+  after a 16:9 source swap mid-playback, so 16:9 players with bars mean the
+  bars are in the video. Preview suite (all but YouTube) 87/94, every miss
+  from the owner's typing reaching a key test player; those groups pass
+  when undisturbed (corners 9/9 with the new idle guard).
+- Browser checks on the Dev candidate (throwaway profile): 44/44 (round 9,
+  corners, round 8, motion, keyboard, accessibility, captions) plus 18/18
+  for controls, video size changes, minimize and return to tab in a run the
+  owner stopped while using the Mac (the remaining groups were re-run).
+- Frontend comparison with the installed personal.21: browser/omni.ja
+  unchanged; toolkit omni.ja differs only in `player.css` and the build
+  metadata (`buildconfig.html`, `AppConstants.sys.mjs`).
+- Production candidate `dist/yab-pip-personal.22-production` (kept as
+  `Zen.app.disabled`, unregistered from Launch Services): signed by
+  fingerprint with the installed app's certificate; notarization
+  053c5726-f961-427f-9799-9989b181806f Accepted (no issues), stapled,
+  Gatekeeper accepted. Only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+
 ## Verification and installation — personal.21
 
 personal.21 = a new full-source engine from `3f73fd0d` (round 8 of the
