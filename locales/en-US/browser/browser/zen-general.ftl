@@ -50,26 +50,33 @@ pictureinpicture-minimize-btn =
   .aria-label = Minimize
   .tooltip = Minimize
 
-## Native Picture-in-Picture controls (macOS)
+# Native Picture-in-Picture controls (macOS)
 
 zen-pip-back-15 =
   .aria-label = Back 15 seconds
 zen-pip-forward-15 =
   .aria-label = Forward 15 seconds
-zen-pip-captions-show =
-  .aria-label = Show captions
-zen-pip-captions-hide =
-  .aria-label = Hide captions
-zen-pip-captions-unavailable =
-  .aria-label = Captions unavailable
+zen-pip-replay =
+  .aria-label = Replay
+zen-pip-subtitles-show =
+  .aria-label = Show subtitles
+zen-pip-subtitles-hide =
+  .aria-label = Hide subtitles
+zen-pip-subtitles-unavailable =
+  .aria-label = No subtitles
 zen-pip-timeline =
   .aria-label = Playback position
-# Joins the elapsed and total time, e.g. "1:35 of 24:01".
-zen-pip-time-of = of
+# Read out with the timeline, e.g. "1:35 of 24:01".
+# Variables:
+#   $elapsed (String) - the position in the video
+#   $duration (String) - the length of the video
+zen-pip-time-position = { $elapsed } of { $duration }
 zen-pip-live = Live
 zen-pip-go-live = Go to live
-# Spoken after a duration, e.g. "5:00 behind live".
-zen-pip-behind-live = behind live
+# Read out with the timeline of a live stream, e.g. "5:00 behind live".
+# Variables:
+#   $duration (String) - how far behind the live edge the position is
+zen-pip-behind-live = { $duration } behind live
 zen-pip-restore =
   .aria-label = Show Picture-in-Picture
 

@@ -11,7 +11,9 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
+#include <optional>
 #include <vector>
 
 #include "ZenPipGeometry.h"
@@ -42,6 +44,8 @@ constexpr CGFloat kReferenceWidth = 640;
 constexpr CGFloat kResizeBand = 9;
 constexpr CGFloat kResizeCornerBand = 18;
 constexpr CGFloat kDragThreshold = 3;
+// How close (pt) a frame must be to an edge of its area to count as docked.
+constexpr double kDockTolerance = 2;
 // Crossing onto another display while dragging: the drag must push past the
 // edge by a quarter of the player (within these bounds, in points) with the
 // pointer at least kCrossDisplayPointerInset inside the other display, and
@@ -53,41 +57,76 @@ constexpr double kCrossDisplayPushMin = 48;
 constexpr double kCrossDisplayPushMax = 160;
 constexpr CGFloat kCrossDisplayPointerInset = 16;
 constexpr NSTimeInterval kCrossDisplayHold = 0.22;
+// Released while pushed this far (a fraction of its width) past the left or
+// right edge of its display, with no display beyond that edge, the player
+// stashes into the edge.
+constexpr double kStashPushFraction = 0.4;
+// The tab a stashed player leaves at the screen edge.
+constexpr CGFloat kTabWidth = 22;
+constexpr CGFloat kTabHeight = 60;
+constexpr CGFloat kTabGap = 8;  // between the tabs of several players
 constexpr NSTimeInterval kInitialRevealDuration = 2.5;
+// Buffering shows a spinner only once it lasts, so short stalls don't flash.
+constexpr NSTimeInterval kSpinnerDelay = 0.4;
+// Motion. Exits are quicker than entrances; the controls fading after a
+// while without activity are softer than the ones the pointer left.
+constexpr NSTimeInterval kRevealDuration = 0.15;
+constexpr NSTimeInterval kHideDuration = 0.15;
+constexpr NSTimeInterval kIdleHideDuration = 0.25;
+constexpr NSTimeInterval kPointerLeftGrace = 0.3;
+constexpr NSTimeInterval kEntranceDuration = 0.25;
+constexpr NSTimeInterval kExitFadeDuration = 0.15;
+constexpr NSTimeInterval kShrinkDuration = 0.25;
+constexpr NSTimeInterval kStashDuration = 0.2;
+constexpr NSTimeInterval kUnstashDuration = 0.25;
 // Apple's dark dimming layer for Clear glass over bright content (HIG
 // "Materials": "consider adding a dark dimming layer of 35% opacity").
 constexpr CGFloat kDimmingOpacity = 0.35;
 // The speeds the speed menu offers.
 constexpr double kSpeedMenuRates[] = {0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
 
+// macOS virtual key codes.
+constexpr unsigned short kKeyReturn = 36;
+constexpr unsigned short kKeyTab = 48;
+constexpr unsigned short kKeySpace = 49;
+constexpr unsigned short kKeyEscape = 53;
+constexpr unsigned short kKeyW = 13;
+constexpr unsigned short kKeyP = 35;
+constexpr unsigned short kKeyM = 46;
+constexpr unsigned short kKeyEnter = 76;
+constexpr unsigned short kKeyHome = 115;
+constexpr unsigned short kKeyEnd = 119;
+constexpr unsigned short kKeyLeft = 123;
+constexpr unsigned short kKeyRight = 124;
+
 struct Config {
   double edgeGap = 10;
-  SpringParams spring{0.42, 0.86};
+  SpringParams spring;
   ReleaseParams release;
   SizeLimits limits;
   NSTimeInterval idleHideDelay = 2.4;
   bool carryWithTwoFingers = true;
+  bool rightToLeft = false;
 };
 
 struct Appearance {
   bool reduceMotion = false;
-  bool reduceTransparency = false;
   bool increaseContrast = false;
   bool voiceOver = false;
 };
 
 Appearance CurrentAppearance() {
   NSWorkspace* ws = NSWorkspace.sharedWorkspace;
-  Appearance a;
-  a.reduceMotion = ws.accessibilityDisplayShouldReduceMotion;
-  a.reduceTransparency = ws.accessibilityDisplayShouldReduceTransparency;
-  a.increaseContrast = ws.accessibilityDisplayShouldIncreaseContrast;
-  a.voiceOver = ws.isVoiceOverEnabled;
-  return a;
+  return {ws.accessibilityDisplayShouldReduceMotion,
+          ws.accessibilityDisplayShouldIncreaseContrast, ws.isVoiceOverEnabled};
 }
 
 Box ToRect(NSRect aRect) {
   return {aRect.origin.x, aRect.origin.y, aRect.size.width, aRect.size.height};
+}
+
+NSRect ToNSRect(const Box& aRect) {
+  return NSMakeRect(aRect.x, aRect.y, aRect.width, aRect.height);
 }
 
 // Where the pointer was for a mouse event, in screen coordinates. Taken from
@@ -108,8 +147,13 @@ CGDirectDisplayID DisplayID(NSScreen* aScreen) {
   return [aScreen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
 }
 
-NSRect ToNSRect(const Box& aRect) {
-  return NSMakeRect(aRect.x, aRect.y, aRect.width, aRect.height);
+// The usable area of every display, in NSScreen.screens order.
+std::vector<Box> ScreenAreas(double aGap) {
+  std::vector<Box> areas;
+  for (NSScreen* screen in NSScreen.screens) {
+    areas.push_back(AllowedArea(ToRect(screen.visibleFrame), aGap));
+  }
+  return areas;
 }
 
 NSString* FormatTime(double aSeconds) {
@@ -123,42 +167,47 @@ NSString* FormatTime(double aSeconds) {
 }
 
 NSString* FormatRate(double aRate) {
-  NSNumberFormatter* f = [[NSNumberFormatter alloc] init];
-  f.minimumFractionDigits = 0;
-  f.maximumFractionDigits = 2;
-  f.minimumIntegerDigits = 1;
-  return [[f stringFromNumber:@(aRate)] stringByAppendingString:@"×"];
+  static NSNumberFormatter* formatter = [] {
+    NSNumberFormatter* f = [[NSNumberFormatter alloc] init];
+    f.minimumFractionDigits = 0;
+    f.maximumFractionDigits = 2;
+    f.minimumIntegerDigits = 1;
+    return f;
+  }();
+  return [[formatter stringFromNumber:@(aRate)] stringByAppendingString:@"×"];
 }
 
-bool SameRate(double aA, double aB) {
-  return std::abs(aA - aB) < 0.001;
+bool SameRate(double aA, double aB) { return std::abs(aA - aB) < 0.001; }
+
+// Fills a localized template's %1$@ and %2$@.
+NSString* FillTemplate(NSString* aTemplate, NSString* aFirst,
+                       NSString* _Nullable aSecond = nil) {
+  NSString* filled = [aTemplate stringByReplacingOccurrencesOfString:@"%1$@"
+                                                          withString:aFirst];
+  return aSecond ? [filled stringByReplacingOccurrencesOfString:@"%2$@"
+                                                     withString:aSecond]
+                 : filled;
 }
 
-// The speed button is a gauge whose needle shows the speed: straight up at
-// normal speed, leaning left when slower and right when faster.
-NSString* SpeedSymbolName(double aRate) {
-  if (aRate < 0.75 && !SameRate(aRate, 0.75)) {
-    return @"gauge.with.dots.needle.0percent";
+// `aVariableValue` in [0, 1] fills a variable symbol (macOS 13+) that far.
+NSImage* Symbol(NSString* aName, CGFloat aPointSize, NSFontWeight aWeight,
+                double aVariableValue = -1) {
+  NSImage* image = nil;
+  if (aVariableValue >= 0) {
+    if (@available(macOS 13.0, *)) {
+      image = [NSImage imageWithSystemSymbolName:aName
+                                   variableValue:aVariableValue
+                        accessibilityDescription:nil];
+    }
   }
-  if (aRate < 1 && !SameRate(aRate, 1)) {
-    return @"gauge.with.dots.needle.33percent";
+  if (!image) {
+    image = [NSImage imageWithSystemSymbolName:aName
+                      accessibilityDescription:nil];
   }
-  if (SameRate(aRate, 1)) {
-    return @"gauge.with.dots.needle.50percent";
-  }
-  if (aRate < 2 && !SameRate(aRate, 2)) {
-    return @"gauge.with.dots.needle.67percent";
-  }
-  return @"gauge.with.dots.needle.100percent";
-}
-
-NSImage* Symbol(NSString* aName, CGFloat aPointSize, NSFontWeight aWeight) {
-  NSImage* image = [NSImage imageWithSystemSymbolName:aName
-                             accessibilityDescription:nil];
-  NSImageSymbolConfiguration* config =
-      [NSImageSymbolConfiguration configurationWithPointSize:aPointSize
-                                                      weight:aWeight
-                                                       scale:NSImageSymbolScaleMedium];
+  NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration
+      configurationWithPointSize:aPointSize
+                          weight:aWeight
+                           scale:NSImageSymbolScaleMedium];
   return [image imageWithSymbolConfiguration:config];
 }
 
@@ -166,27 +215,54 @@ NSString* JSONString(NSDictionary* aObject) {
   NSData* data = [NSJSONSerialization dataWithJSONObject:aObject
                                                  options:0
                                                    error:nil];
-  return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+  return data ? [[NSString alloc] initWithData:data
+                                      encoding:NSUTF8StringEncoding]
               : @"{}";
+}
+
+CAMediaTimingFunction* EaseOut() {  // quartic
+  return [CAMediaTimingFunction functionWithControlPoints:0.165:0.84:0.44:1];
+}
+
+CAMediaTimingFunction* EaseIn() {  // cubic
+  return [CAMediaTimingFunction functionWithControlPoints:
+                                                     0.55:0.055:0.675:0.19];
+}
+
+CAMediaTimingFunction* EaseInOut() {  // cubic
+  return [CAMediaTimingFunction functionWithControlPoints:0.645:0.045:0.355:1];
+}
+
+// A light tick on Force Touch trackpads (nothing on other devices).
+void PerformAlignmentFeedback() {
+  [NSHapticFeedbackManager.defaultPerformer
+      performFeedbackPattern:NSHapticFeedbackPatternAlignment
+             performanceTime:NSHapticFeedbackPerformanceTimeNow];
 }
 
 // "rgba(...)" for a MediaAccessibility color (+1 reference, released here)
 // and its separate opacity setting.
 NSString* CSSColor(CGColorRef aColor, CGFloat aOpacity) {
-  NSColor* color = aColor ? [[NSColor colorWithCGColor:aColor]
-                                colorUsingColorSpace:NSColorSpace.sRGBColorSpace]
-                          : nil;
+  NSColor* color = aColor
+                       ? [[NSColor colorWithCGColor:aColor]
+                             colorUsingColorSpace:NSColorSpace.sRGBColorSpace]
+                       : nil;
   if (aColor) {
     CFRelease(aColor);
   }
   if (!color) {
     return @"transparent";
   }
-  return [NSString stringWithFormat:@"rgba(%ld, %ld, %ld, %.3f)",
-                                    lround(std::clamp<CGFloat>(color.redComponent, 0, 1) * 255),
-                                    lround(std::clamp<CGFloat>(color.greenComponent, 0, 1) * 255),
-                                    lround(std::clamp<CGFloat>(color.blueComponent, 0, 1) * 255),
-                                    std::clamp<CGFloat>(color.alphaComponent * aOpacity, 0, 1)];
+  return [NSString
+      stringWithFormat:@"rgba(%ld, %ld, %ld, %.3f)",
+                       lround(std::clamp<CGFloat>(color.redComponent, 0, 1) *
+                              255),
+                       lround(std::clamp<CGFloat>(color.greenComponent, 0, 1) *
+                              255),
+                       lround(std::clamp<CGFloat>(color.blueComponent, 0, 1) *
+                              255),
+                       std::clamp<CGFloat>(color.alphaComponent * aOpacity, 0,
+                                           1)];
 }
 
 // The user's system caption style (System Settings > Accessibility >
@@ -195,13 +271,17 @@ NSString* CSSColor(CGColorRef aColor, CGFloat aOpacity) {
 // preferences).
 NSDictionary* SystemCaptionStyle() {
   const MACaptionAppearanceDomain domain = kMACaptionAppearanceDomainUser;
-  NSString* text = CSSColor(MACaptionAppearanceCopyForegroundColor(domain, nullptr),
-                            MACaptionAppearanceGetForegroundOpacity(domain, nullptr));
+  NSString* text =
+      CSSColor(MACaptionAppearanceCopyForegroundColor(domain, nullptr),
+               MACaptionAppearanceGetForegroundOpacity(domain, nullptr));
   CGFloat windowOpacity = MACaptionAppearanceGetWindowOpacity(domain, nullptr);
-  CGFloat backgroundOpacity = MACaptionAppearanceGetBackgroundOpacity(domain, nullptr);
-  NSString* window = CSSColor(MACaptionAppearanceCopyWindowColor(domain, nullptr), windowOpacity);
+  CGFloat backgroundOpacity =
+      MACaptionAppearanceGetBackgroundOpacity(domain, nullptr);
+  NSString* window = CSSColor(
+      MACaptionAppearanceCopyWindowColor(domain, nullptr), windowOpacity);
   NSString* background =
-      CSSColor(MACaptionAppearanceCopyBackgroundColor(domain, nullptr), backgroundOpacity);
+      CSSColor(MACaptionAppearanceCopyBackgroundColor(domain, nullptr),
+               backgroundOpacity);
   // One box behind the text: Apple's caption "window" when it is visible,
   // otherwise the per-line text background.
   NSString* box = windowOpacity > 0.01       ? window
@@ -212,10 +292,13 @@ NSDictionary* SystemCaptionStyle() {
   double weight = 500;
   if (CTFontDescriptorRef font = MACaptionAppearanceCopyFontDescriptorForStyle(
           domain, nullptr, kMACaptionAppearanceFontStyleDefault)) {
-    NSString* name = CFBridgingRelease(CTFontDescriptorCopyAttribute(font, kCTFontFamilyNameAttribute));
+    NSString* name = CFBridgingRelease(
+        CTFontDescriptorCopyAttribute(font, kCTFontFamilyNameAttribute));
     if (name.length && ![name hasPrefix:@"."]) {
-      NSString* quoted = [[name stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
-          stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+      NSString* quoted = [[name stringByReplacingOccurrencesOfString:@"\\"
+                                                          withString:@"\\\\"]
+          stringByReplacingOccurrencesOfString:@"\""
+                                    withString:@"\\\""];
       family = [NSString stringWithFormat:@"\"%@\", system-ui", quoted];
     }
     CTFontRef ctFont = CTFontCreateWithFontDescriptor(font, 16, nullptr);
@@ -224,7 +307,8 @@ NSDictionary* SystemCaptionStyle() {
     CFRelease(font);
     // CoreText weight (-1..1) to the nearest CSS weight.
     double ct = [traits[(id)kCTFontWeightTrait] doubleValue];
-    const double ctWeights[] = {-0.8, -0.6, -0.4, 0, 0.23, 0.3, 0.4, 0.56, 0.62};
+    const double ctWeights[] = {-0.8, -0.6, -0.4, 0,   0.23,
+                                0.3,  0.4,  0.56, 0.62};
     double best = 1e9;
     for (int i = 0; i < 9; i++) {
       if (std::abs(ctWeights[i] - ct) < best) {
@@ -243,7 +327,8 @@ NSDictionary* SystemCaptionStyle() {
       shadow = @"0.05em 0.05em 0.08em rgba(0, 0, 0, 0.9)";
       break;
     case kMACaptionAppearanceTextEdgeStyleUniform:
-      shadow = @"0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000";
+      shadow =
+          @"0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000, 0 0 0.05em #000";
       break;
     case kMACaptionAppearanceTextEdgeStyleDropShadow:
       shadow = @"0 0.06em 0.12em rgba(0, 0, 0, 0.9)";
@@ -255,17 +340,19 @@ NSDictionary* SystemCaptionStyle() {
     @"color" : text,
     @"box" : box,
     @"radius" : @(std::clamp<CGFloat>(
-        MACaptionAppearanceGetWindowRoundedCornerRadius(domain, nullptr), 0, 24)),
+        MACaptionAppearanceGetWindowRoundedCornerRadius(domain, nullptr), 0,
+        24)),
     @"font" : family,
     @"weight" : @(weight),
     @"shadow" : shadow,
-    @"scale" : @(std::clamp<CGFloat>(MACaptionAppearanceGetRelativeCharacterSize(domain, nullptr),
-                                     0.5, 2.0)),
+    @"scale" : @(std::clamp<CGFloat>(
+        MACaptionAppearanceGetRelativeCharacterSize(domain, nullptr), 0.5,
+        2.0)),
   };
 }
 
 NSString* DockName(const Dock& aDock) {
-  NSString* h = aDock.h == HEdge::Left ? @"left"
+  NSString* h = aDock.h == HEdge::Left    ? @"left"
                 : aDock.h == HEdge::Right ? @"right"
                                           : @"";
   NSString* v = aDock.v == VEdge::Bottom ? @"bottom"
@@ -280,18 +367,88 @@ NSString* DockName(const Dock& aDock) {
   return h.length ? h : v;
 }
 
-// The Live badge's dot, followed by `aGap` points of space before the label.
-NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
-  NSImage* image = [NSImage imageWithSize:NSMakeSize(aDiameter + aGap, aDiameter)
-                                  flipped:NO
-                           drawingHandler:^BOOL(NSRect) {
-                             [aColor setFill];
-                             [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(0, 0, aDiameter,
-                                                                                aDiameter)] fill];
-                             return YES;
-                           }];
+// The Live badge's dot, a ring when `aFilled` is NO, followed by `aGap` points
+// of space before the label.
+NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap,
+                      BOOL aFilled) {
+  NSImage* image = [NSImage
+       imageWithSize:NSMakeSize(aDiameter + aGap, aDiameter)
+             flipped:NO
+      drawingHandler:^BOOL(NSRect) {
+        CGFloat line =
+            aFilled ? 0 : std::max<CGFloat>(1.5, round(aDiameter * 0.2));
+        NSBezierPath* dot = [NSBezierPath
+            bezierPathWithOvalInRect:NSInsetRect(
+                                         NSMakeRect(0, 0, aDiameter, aDiameter),
+                                         line / 2, line / 2)];
+        if (aFilled) {
+          [aColor setFill];
+          [dot fill];
+        } else {
+          [aColor setStroke];
+          dot.lineWidth = line;
+          [dot stroke];
+        }
+        return YES;
+      }];
   [image setTemplate:NO];  // keeps its color inside the white-tinted button
   return image;
+}
+
+// A Liquid Glass shape around `aContent`: NSGlassEffectView on macOS 26+, a
+// HUD NSVisualEffectView before. Over video the chrome uses the Clear variant
+// above a 35% dimming layer, with bold, bright, untinted symbols (HIG
+// "Materials", WWDC25 "Meet Liquid Glass"); Regular is for glass over
+// arbitrary content. The system itself applies the Liquid Glass look
+// setting, Reduce Transparency and Increase Contrast to both.
+NSView* MakeGlass(NSView* aContent, BOOL aClear) {
+  NSView* glass;
+  if (@available(macOS 26.0, *)) {
+    NSGlassEffectView* view =
+        [[NSGlassEffectView alloc] initWithFrame:aContent.frame];
+    view.style =
+        aClear ? NSGlassEffectViewStyleClear : NSGlassEffectViewStyleRegular;
+    view.contentView = aContent;
+    glass = view;
+  } else {
+    NSVisualEffectView* view =
+        [[NSVisualEffectView alloc] initWithFrame:aContent.frame];
+    view.material = NSVisualEffectMaterialHUDWindow;
+    view.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+    view.state = NSVisualEffectStateActive;
+    view.wantsLayer = YES;
+    view.layer.masksToBounds = YES;
+    [view addSubview:aContent];
+    glass = view;
+  }
+  glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  return glass;
+}
+
+void SetGlassCornerRadius(NSView* aGlass, CGFloat aRadius) {
+  if (@available(macOS 26.0, *)) {
+    ((NSGlassEffectView*)aGlass).cornerRadius = aRadius;
+  } else {
+    aGlass.layer.cornerRadius = aRadius;
+  }
+}
+
+// Interactive glass reacts to the pointer and to presses (macOS 27+).
+void SetGlassInteractive(NSView* aGlass, BOOL aInteractive) {
+  if (@available(macOS 27.0, *)) {
+    ((NSGlassEffectView*)aGlass).effectIsInteractive = aInteractive;
+  }
+}
+
+// The Command shortcuts the player handles itself: ⌘W closes it, ⌘← ⌘→ and
+// ⌘Home ⌘End seek, ⌘⌥⇧P toggles Picture-in-Picture.
+bool IsPlayerCommandKey(NSEvent* aEvent) {
+  unsigned short code = aEvent.keyCode;
+  NSEventModifierFlags mods = aEvent.modifierFlags;
+  return code == kKeyW || code == kKeyLeft || code == kKeyRight ||
+         code == kKeyHome || code == kKeyEnd ||
+         (code == kKeyP && (mods & NSEventModifierFlagOption) &&
+          (mods & NSEventModifierFlagShift));
 }
 
 }  // namespace
@@ -310,18 +467,17 @@ NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
   return YES;
 }
 - (BOOL)canBecomeKeyView {
-  return self.isEnabled && !self.refusesFirstResponder && !self.isHiddenOrHasHiddenAncestor;
-}
-- (BOOL)mouseDownCanMoveWindow {
-  return NO;
+  return self.isEnabled && !self.refusesFirstResponder &&
+         !self.isHiddenOrHasHiddenAncestor;
 }
 // Space presses the focused control even when the system "Keyboard
 // navigation" setting is off (AppKit only does it when it is on).
 - (void)keyDown:(NSEvent*)aEvent {
-  NSEventModifierFlags mods = aEvent.modifierFlags & (NSEventModifierFlagCommand |
-                                                      NSEventModifierFlagControl |
-                                                      NSEventModifierFlagOption);
-  if (aEvent.keyCode == 49 /* Space */ && !mods && self.isEnabled) {
+  NSEventModifierFlags mods =
+      aEvent.modifierFlags &
+      (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+       NSEventModifierFlagOption);
+  if (aEvent.keyCode == kKeySpace && !mods && self.isEnabled) {
     [self performClick:nil];
     return;
   }
@@ -337,10 +493,102 @@ NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
 }
 @end
 
+// The timeline's track, drawn like Yab's: a thin line, white up to the
+// position and lighter up to what has loaded, with the knob only while the
+// pointer is on the timeline, it is dragged or it has keyboard focus.
+@interface ZenPipSliderCell : NSSliderCell
+@property(nonatomic) double loadedFraction;  // negative when unknown
+@property(nonatomic) BOOL showsKnob;
+@end
+
+@implementation ZenPipSliderCell
+- (void)drawBarInside:(NSRect)aRect flipped:(BOOL)aFlipped {
+  CGFloat height = self.showsKnob ? 4 : 3;
+  NSRect track = NSMakeRect(NSMinX(aRect), round(NSMidY(aRect) - height / 2),
+                            NSWidth(aRect), height);
+  auto fill = [&](CGFloat aWidth, CGFloat aAlpha) {
+    NSRect part = track;
+    part.size.width = std::clamp<CGFloat>(aWidth, 0, NSWidth(track));
+    [[NSColor colorWithWhite:1 alpha:aAlpha] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:part
+                                     xRadius:height / 2
+                                     yRadius:height / 2] fill];
+  };
+  CGFloat played = NSMidX([self knobRectFlipped:aFlipped]) - NSMinX(track);
+  fill(NSWidth(track), 0.3);
+  if (self.loadedFraction >= 0) {
+    fill(round(NSWidth(track) * self.loadedFraction), 0.5);
+  }
+  fill(played, 1);
+}
+- (void)drawKnob:(NSRect)aKnobRect {
+  if (!self.showsKnob) {
+    return;
+  }
+  CGFloat d = 12;
+  NSRect knob = NSMakeRect(round(NSMidX(aKnobRect) - d / 2),
+                           round(NSMidY(aKnobRect) - d / 2), d, d);
+  [NSGraphicsContext saveGraphicsState];
+  NSShadow* shadow = [[NSShadow alloc] init];
+  shadow.shadowBlurRadius = 3;
+  shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+  [shadow set];
+  [NSColor.whiteColor setFill];
+  [[NSBezierPath bezierPathWithOvalInRect:knob] fill];
+  [NSGraphicsContext restoreGraphicsState];
+}
+@end
+
 @interface ZenPipSlider : NSSlider
 @end
 
-@implementation ZenPipSlider
+@implementation ZenPipSlider {
+  BOOL mHovered;
+}
++ (Class)cellClass {
+  return [ZenPipSliderCell class];
+}
+- (instancetype)initWithFrame:(NSRect)aFrame {
+  if (!(self = [super initWithFrame:aFrame])) {
+    return nil;
+  }
+  [self addTrackingArea:[[NSTrackingArea alloc]
+                            initWithRect:NSZeroRect
+                                 options:NSTrackingMouseEnteredAndExited |
+                                         NSTrackingActiveAlways |
+                                         NSTrackingInVisibleRect
+                                   owner:self
+                                userInfo:nil]];
+  return self;
+}
+- (void)updateKnob {
+  ZenPipSliderCell* cell = (ZenPipSliderCell*)self.cell;
+  BOOL shows = mHovered || self.window.firstResponder == self;
+  if (cell.showsKnob != shows) {
+    cell.showsKnob = shows;
+    self.needsDisplay = YES;
+  }
+}
+- (void)mouseEntered:(NSEvent*)aEvent {
+  mHovered = YES;
+  [self updateKnob];
+}
+- (void)mouseExited:(NSEvent*)aEvent {
+  mHovered = NO;
+  [self updateKnob];
+}
+- (BOOL)becomeFirstResponder {
+  BOOL became = [super becomeFirstResponder];
+  [self updateKnob];
+  return became;
+}
+- (BOOL)resignFirstResponder {
+  BOOL resigned = [super resignFirstResponder];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [self updateKnob];
+  });
+  return resigned;
+}
 - (BOOL)acceptsFirstMouse:(NSEvent*)aEvent {
   return YES;
 }
@@ -350,47 +598,42 @@ NSImage* LiveDotImage(NSColor* aColor, CGFloat aDiameter, CGFloat aGap) {
 // Tab goes up to the overlay, which moves focus in reading order (the slider
 // would otherwise follow AppKit's key-view loop, see -keyboardOrder).
 - (void)keyDown:(NSEvent*)aEvent {
-  if (aEvent.keyCode == 48 /* Tab */) {
+  if (aEvent.keyCode == kKeyTab) {
     [self.nextResponder keyDown:aEvent];
     return;
   }
   [super keyDown:aEvent];
 }
-- (BOOL)mouseDownCanMoveWindow {
-  return NO;
+@end
+
+// The buffering spinner drawn over the play button; clicks go to the button.
+@interface ZenPipSpinner : NSProgressIndicator
+@end
+
+@implementation ZenPipSpinner
+- (NSView*)hitTest:(NSPoint)aPoint {
+  return nil;
 }
 @end
 
-// Apple's guidance for glass over media (HIG "Materials", WWDC25 "Meet Liquid
-// Glass"): the Clear variant above a 35% dark dimming layer, carrying bold,
-// bright symbols, and untinted (tint is reserved for emphasizing a primary
-// action). Regular is for glass over arbitrary content. The system applies the
-// Liquid Glass look setting, Reduce Transparency and Increase Contrast to
-// both variants itself.
-static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
-  if (@available(macOS 26.0, *)) {
-    NSGlassEffectView* glass = (NSGlassEffectView*)aMaterial;
-    glass.style = aClear ? NSGlassEffectViewStyleClear : NSGlassEffectViewStyleRegular;
-    glass.tintColor = nil;
-  }
-}
-
-// A circular or capsule Liquid Glass control: an NSGlassEffectView whose
-// content view is a native button (NSVisualEffectView before macOS 26).
+// A circular or capsule Liquid Glass control: a glass shape whose content view
+// is a native button.
 @interface ZenPipGlassControl : NSView
 @property(nonatomic, readonly) ZenPipButtonCore* button;
 @property(nonatomic, readonly) NSView* material;
-@property(nonatomic) BOOL capsule;
 // Shows information only (a status badge): not focusable, announced as text,
 // and clicks or drags on it go to the player like on the video.
 @property(nonatomic) BOOL statusOnly;
-- (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setClearGlass:(BOOL)aClear;
+- (instancetype)initWithTarget:(id)aTarget
+                        action:(SEL)aAction
+                    clearGlass:(BOOL)aClear;
 @end
 
 @implementation ZenPipGlassControl
 
-- (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction {
+- (instancetype)initWithTarget:(id)aTarget
+                        action:(SEL)aAction
+                    clearGlass:(BOOL)aClear {
   if (!(self = [super initWithFrame:NSMakeRect(0, 0, 32, 32)])) {
     return nil;
   }
@@ -401,37 +644,12 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
   _button.contentTintColor = NSColor.whiteColor;
   _button.target = aTarget;
   _button.action = aAction;
-  _button.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _button.focusRingType = NSFocusRingTypeDefault;
-
-  if (@available(macOS 26.0, *)) {
-    NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
-    glass.style = NSGlassEffectViewStyleClear;
-    glass.contentView = _button;
-    if (@available(macOS 27.0, *)) {
-      if ([glass respondsToSelector:@selector(setEffectIsInteractive:)]) {
-        glass.effectIsInteractive = YES;
-      }
-    }
-    _material = glass;
-  } else {
-    NSVisualEffectView* effect = [[NSVisualEffectView alloc] initWithFrame:self.bounds];
-    effect.material = NSVisualEffectMaterialHUDWindow;
-    effect.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-    effect.state = NSVisualEffectStateActive;
-    effect.wantsLayer = YES;
-    effect.layer.masksToBounds = YES;
-    [effect addSubview:_button];
-    _material = effect;
-  }
-  _material.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _material = MakeGlass(_button, aClear);
+  SetGlassInteractive(_material, YES);
   [self addSubview:_material];
   self.accessibilityElement = NO;
   return self;
-}
-
-- (void)setClearGlass:(BOOL)aClear {
-  ApplyGlass(_material, aClear);
 }
 
 - (void)setStatusOnly:(BOOL)aStatusOnly {
@@ -440,12 +658,9 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
   }
   _statusOnly = aStatusOnly;
   _button.refusesFirstResponder = aStatusOnly;
-  _button.accessibilityRole = aStatusOnly ? NSAccessibilityStaticTextRole : NSAccessibilityButtonRole;
-  if (@available(macOS 27.0, *)) {
-    if ([_material respondsToSelector:@selector(setEffectIsInteractive:)]) {
-      ((NSGlassEffectView*)_material).effectIsInteractive = !aStatusOnly;
-    }
-  }
+  _button.accessibilityRole =
+      aStatusOnly ? NSAccessibilityStaticTextRole : NSAccessibilityButtonRole;
+  SetGlassInteractive(_material, !aStatusOnly);
 }
 
 - (NSView*)hitTest:(NSPoint)aPoint {
@@ -456,11 +671,7 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
   [super setFrameSize:aSize];
   CGFloat radius = std::min(aSize.width, aSize.height) / 2;
   _button.focusCornerRadius = radius;
-  if (@available(macOS 26.0, *)) {
-    ((NSGlassEffectView*)_material).cornerRadius = radius;
-  } else {
-    _material.layer.cornerRadius = radius;
-  }
+  SetGlassCornerRadius(_material, radius);
   _material.frame = self.bounds;
   _button.frame = _material.bounds;
 }
@@ -475,20 +686,18 @@ static void ApplyGlass(NSView* aMaterial, BOOL aClear) {
 @property(nonatomic) BOOL showsLabels;
 @property(nonatomic) CGFloat fontSize;
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
-- (void)setClearGlass:(BOOL)aClear;
 @end
-
-@implementation ZenPipTimeline {
-  NSView* mContent;
-}
 
 static NSTextField* MakeTimeLabel() {
   NSTextField* label = [NSTextField labelWithString:@"0:00"];
   label.textColor = NSColor.whiteColor;
-  label.font = [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightSemibold];
   label.lineBreakMode = NSLineBreakByClipping;
   label.accessibilityElement = NO;  // the slider reports the time
   return label;
+}
+
+@implementation ZenPipTimeline {
+  NSView* mContent;
 }
 
 - (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction {
@@ -496,44 +705,25 @@ static NSTextField* MakeTimeLabel() {
     return nil;
   }
   mContent = [[NSView alloc] initWithFrame:self.bounds];
-  mContent.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _elapsed = MakeTimeLabel();
   _duration = MakeTimeLabel();
   _duration.alignment = NSTextAlignmentRight;
-  _slider = [ZenPipSlider sliderWithValue:0 minValue:0 maxValue:1
-                                   target:aTarget action:aAction];
+  _slider = [ZenPipSlider sliderWithValue:0
+                                 minValue:0
+                                 maxValue:1
+                                   target:aTarget
+                                   action:aAction];
   _slider.continuous = YES;
-  _slider.controlSize = NSControlSizeSmall;
-  _slider.trackFillColor = NSColor.whiteColor;
+  ((ZenPipSliderCell*)_slider.cell).loadedFraction = -1;
   [mContent addSubview:_elapsed];
   [mContent addSubview:_slider];
   [mContent addSubview:_duration];
   _showsLabels = YES;
   _fontSize = 12;
-
-  if (@available(macOS 26.0, *)) {
-    NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
-    glass.style = NSGlassEffectViewStyleClear;
-    glass.contentView = mContent;
-    _material = glass;
-  } else {
-    NSVisualEffectView* effect = [[NSVisualEffectView alloc] initWithFrame:self.bounds];
-    effect.material = NSVisualEffectMaterialHUDWindow;
-    effect.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-    effect.state = NSVisualEffectStateActive;
-    effect.wantsLayer = YES;
-    effect.layer.masksToBounds = YES;
-    [effect addSubview:mContent];
-    _material = effect;
-  }
-  _material.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _material = MakeGlass(mContent, YES);
   [self addSubview:_material];
   self.accessibilityElement = NO;
   return self;
-}
-
-- (void)setClearGlass:(BOOL)aClear {
-  ApplyGlass(_material, aClear);
 }
 
 - (void)setFrameSize:(NSSize)aSize {
@@ -549,11 +739,7 @@ static NSTextField* MakeTimeLabel() {
 - (void)layoutContent {
   NSSize size = self.bounds.size;
   CGFloat radius = size.height / 2;
-  if (@available(macOS 26.0, *)) {
-    ((NSGlassEffectView*)_material).cornerRadius = radius;
-  } else {
-    _material.layer.cornerRadius = radius;
-  }
+  SetGlassCornerRadius(_material, radius);
   _material.frame = self.bounds;
   mContent.frame = _material.bounds;
 
@@ -566,43 +752,148 @@ static NSTextField* MakeTimeLabel() {
   CGFloat labelY = round((size.height - labelH) / 2);
   CGFloat labelW = 0;
   if (_showsLabels) {
-    NSString* widest = _duration.stringValue.length > _elapsed.stringValue.length
-                           ? _duration.stringValue
-                           : _elapsed.stringValue;
-    labelW = ceil([[widest stringByReplacingOccurrencesOfString:@"[0-9]"
-                                                      withString:@"0"
-                                                         options:NSRegularExpressionSearch
-                                                           range:NSMakeRange(0, widest.length)]
-                      sizeWithAttributes:@{NSFontAttributeName : font}]
-                      .width) +
-             2;
+    // Both labels are as wide as the longer one, so the slider never moves
+    // while the time ticks (the digits are monospaced).
+    NSString* widest =
+        _duration.stringValue.length > _elapsed.stringValue.length
+            ? _duration.stringValue
+            : _elapsed.stringValue;
+    labelW =
+        ceil([widest sizeWithAttributes:@{NSFontAttributeName : font}].width) +
+        2;
   }
   _elapsed.hidden = !_showsLabels;
   _duration.hidden = !_showsLabels || _duration.stringValue.length == 0;
   _elapsed.frame = NSMakeRect(pad, labelY, labelW, labelH);
-  _duration.frame = NSMakeRect(size.width - pad - labelW, labelY, labelW, labelH);
+  _duration.frame =
+      NSMakeRect(size.width - pad - labelW, labelY, labelW, labelH);
   CGFloat gap = _showsLabels ? std::max<CGFloat>(8, pad * 0.7) : 0;
   CGFloat sliderX = pad + labelW + gap;
   CGFloat sliderW = std::max<CGFloat>(0, size.width - 2 * sliderX);
   CGFloat sliderH = std::min<CGFloat>(size.height, 20);
-  _slider.frame = NSMakeRect(sliderX, round((size.height - sliderH) / 2), sliderW, sliderH);
+  _slider.frame =
+      NSMakeRect(sliderX, round((size.height - sliderH) / 2), sliderW, sliderH);
 }
 @end
 
-#pragma mark - Minimized panel
-
-@interface ZenPipTuckPanel : NSPanel
-@property(nonatomic, readonly) ZenPipGlassControl* control;
-- (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction;
+// What the overlay and the stash tab forward to the chrome.
+@interface ZenPipPlayerChrome () <NSMenuDelegate, NSMenuItemValidation>
+- (void)overlayMouseMoved:(NSEvent*)aEvent;
+- (void)overlayMouseExited;
+- (void)overlayScroll:(NSEvent*)aEvent;
+- (void)overlayMagnify:(NSEvent*)aEvent;
+- (void)overlayKeyDown:(NSEvent*)aEvent;
+- (void)overlayLayout;
+- (void)overlayUpdateCursor:(NSEvent*)aEvent;
+- (void)tabPressed;
+- (void)tabMovedTo:(CGFloat)aY;
 @end
 
-@implementation ZenPipTuckPanel
-- (instancetype)initWithTarget:(id)aTarget action:(SEL)aAction {
-  if (!(self = [super initWithContentRect:NSMakeRect(0, 0, 48, 48)
-                                styleMask:NSWindowStyleMaskBorderless |
-                                          NSWindowStyleMaskNonactivatingPanel
-                                  backing:NSBackingStoreBuffered
-                                    defer:YES])) {
+#pragma mark - Stash tab
+
+// The tab a stashed player leaves at the screen edge. A click on it, or Space
+// or Return once it has keyboard focus (Command-` reaches it), brings the
+// player back; dragging moves it along the edge.
+@interface ZenPipStashTabView : NSView
+@property(nonatomic, weak) ZenPipPlayerChrome* chrome;
+@property(nonatomic, readonly) NSImageView* chevron;
+@end
+
+@implementation ZenPipStashTabView {
+  NSView* mMaterial;
+  NSPoint mPressPoint;
+  CGFloat mPressY;
+  BOOL mDragged;
+}
+
+- (instancetype)initWithFrame:(NSRect)aFrame {
+  if (!(self = [super initWithFrame:aFrame])) {
+    return nil;
+  }
+  _chevron = [[NSImageView alloc] initWithFrame:self.bounds];
+  _chevron.imageScaling = NSImageScaleNone;
+  _chevron.contentTintColor = NSColor.whiteColor;
+  // Over arbitrary desktop content, not video: Regular glass.
+  mMaterial = MakeGlass(_chevron, NO);
+  mMaterial.frame = self.bounds;
+  SetGlassCornerRadius(mMaterial, aFrame.size.width / 2);
+  _chevron.frame = mMaterial.bounds;
+  [self addSubview:mMaterial];
+  return self;
+}
+
+- (BOOL)acceptsFirstMouse:(NSEvent*)aEvent {
+  return YES;
+}
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+// Clicks don't take the keyboard from the app the user is in.
+- (BOOL)needsPanelToBecomeKey {
+  return NO;
+}
+- (NSRect)focusRingMaskBounds {
+  return self.bounds;
+}
+- (void)drawFocusRingMask {
+  CGFloat radius = self.bounds.size.width / 2;
+  [[NSBezierPath bezierPathWithRoundedRect:self.bounds
+                                   xRadius:radius
+                                   yRadius:radius] fill];
+}
+
+- (BOOL)isAccessibilityElement {
+  return YES;
+}
+- (NSAccessibilityRole)accessibilityRole {
+  return NSAccessibilityButtonRole;
+}
+- (BOOL)accessibilityPerformPress {
+  [_chrome tabPressed];
+  return YES;
+}
+
+- (void)mouseDown:(NSEvent*)aEvent {
+  mPressPoint = EventScreenLocation(aEvent);
+  mPressY = NSMinY(self.window.frame);
+  mDragged = NO;
+}
+- (void)mouseDragged:(NSEvent*)aEvent {
+  NSPoint p = EventScreenLocation(aEvent);
+  if (!mDragged && std::abs(p.y - mPressPoint.y) < kDragThreshold) {
+    return;
+  }
+  mDragged = YES;
+  [_chrome tabMovedTo:mPressY + p.y - mPressPoint.y];
+}
+- (void)mouseUp:(NSEvent*)aEvent {
+  if (!mDragged) {
+    [_chrome tabPressed];
+  }
+}
+- (void)keyDown:(NSEvent*)aEvent {
+  unsigned short code = aEvent.keyCode;
+  if (code == kKeySpace || code == kKeyReturn || code == kKeyEnter) {
+    [_chrome tabPressed];
+    return;
+  }
+  [super keyDown:aEvent];
+}
+@end
+
+@interface ZenPipStashTab : NSPanel
+@property(nonatomic, readonly) ZenPipStashTabView* tabView;
+- (instancetype)initWithChrome:(ZenPipPlayerChrome*)aChrome;
+@end
+
+@implementation ZenPipStashTab
+- (instancetype)initWithChrome:(ZenPipPlayerChrome*)aChrome {
+  if (!(self =
+            [super initWithContentRect:NSMakeRect(0, 0, kTabWidth, kTabHeight)
+                             styleMask:NSWindowStyleMaskBorderless |
+                                       NSWindowStyleMaskNonactivatingPanel
+                               backing:NSBackingStoreBuffered
+                                 defer:YES])) {
     return nil;
   }
   self.releasedWhenClosed = NO;
@@ -611,63 +902,58 @@ static NSTextField* MakeTimeLabel() {
   self.hasShadow = YES;
   self.level = NSFloatingWindowLevel;
   self.hidesOnDeactivate = NO;
+  self.canHide = NO;
   self.movable = NO;
+  self.becomesKeyOnlyIfNeeded = YES;
   self.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-                            NSWindowCollectionBehaviorFullScreenAuxiliary |
-                            NSWindowCollectionBehaviorIgnoresCycle;
+                            NSWindowCollectionBehaviorFullScreenAuxiliary;
   self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-  _control = [[ZenPipGlassControl alloc] initWithTarget:aTarget action:aAction];
-  _control.button.image = Symbol(@"pip.enter", 17, NSFontWeightSemibold);
-  _control.frame = NSMakeRect(0, 0, 48, 48);
-  // Sits over arbitrary desktop content, not video: Regular glass.
-  [_control setClearGlass:NO];
-  self.contentView = _control;
+  _tabView = [[ZenPipStashTabView alloc]
+      initWithFrame:NSMakeRect(0, 0, kTabWidth, kTabHeight)];
+  _tabView.chrome = aChrome;
+  self.contentView = _tabView;
   return self;
 }
+// Borderless panels can't become key by default; keyboard users reach the
+// tab through window cycling.
 - (BOOL)canBecomeKeyWindow {
-  return NO;
+  return YES;
 }
-- (BOOL)canBecomeMainWindow {
-  return NO;
+- (void)becomeKeyWindow {
+  [super becomeKeyWindow];
+  [self makeFirstResponder:_tabView];
 }
 @end
 
 #pragma mark - Overlay view
 
-@class ZenPipPlayerChrome;
-
-@interface ZenPipPlayerChrome (Internal)
-- (void)overlayMouseDown:(NSEvent*)aEvent;
-- (void)overlayMouseDragged:(NSEvent*)aEvent;
-- (void)overlayMouseUp:(NSEvent*)aEvent;
-- (void)overlayMouseMoved:(NSEvent*)aEvent inside:(BOOL)aInside;
-- (void)overlayMouseExited;
-- (void)overlayScroll:(NSEvent*)aEvent;
-- (void)overlayMagnify:(NSEvent*)aEvent;
-- (BOOL)overlayKeyDown:(NSEvent*)aEvent;
-- (void)overlayLayout;
-- (void)overlayUpdateCursor:(NSEvent*)aEvent;
-@end
-
 @interface ZenPipOverlayView : NSView
 @property(nonatomic, weak) ZenPipPlayerChrome* chrome;
 @end
 
-@implementation ZenPipOverlayView {
-  NSTrackingArea* mTrackingArea;
+@implementation ZenPipOverlayView
+
+- (instancetype)initWithFrame:(NSRect)aFrame {
+  if (!(self = [super initWithFrame:aFrame])) {
+    return nil;
+  }
+  [self addTrackingArea:[[NSTrackingArea alloc]
+                            initWithRect:NSZeroRect
+                                 options:NSTrackingMouseEnteredAndExited |
+                                         NSTrackingMouseMoved |
+                                         NSTrackingActiveAlways |
+                                         NSTrackingInVisibleRect |
+                                         NSTrackingCursorUpdate
+                                   owner:self
+                                userInfo:nil]];
+  return self;
 }
 
-- (BOOL)isFlipped {
-  return NO;
-}
 - (BOOL)acceptsFirstMouse:(NSEvent*)aEvent {
   return YES;
 }
 - (BOOL)acceptsFirstResponder {
   return YES;
-}
-- (BOOL)mouseDownCanMoveWindow {
-  return NO;
 }
 
 // Clicks on buttons and the slider go to those controls; everywhere else
@@ -686,48 +972,17 @@ static NSTextField* MakeTimeLabel() {
   return self;
 }
 
-- (void)updateTrackingAreas {
-  if (mTrackingArea) {
-    [self removeTrackingArea:mTrackingArea];
-  }
-  mTrackingArea = [[NSTrackingArea alloc]
-      initWithRect:NSZeroRect
-           options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
-                   NSTrackingActiveAlways | NSTrackingInVisibleRect |
-                   NSTrackingCursorUpdate
-             owner:self
-          userInfo:nil];
-  [self addTrackingArea:mTrackingArea];
-  [super updateTrackingAreas];
-}
-
-- (void)removeAllTracking {
-  if (mTrackingArea) {
-    [self removeTrackingArea:mTrackingArea];
-    mTrackingArea = nil;
-  }
-}
-
 - (void)mouseEntered:(NSEvent*)aEvent {
-  [_chrome overlayMouseMoved:aEvent inside:YES];
+  [_chrome overlayMouseMoved:aEvent];
 }
 - (void)mouseMoved:(NSEvent*)aEvent {
-  [_chrome overlayMouseMoved:aEvent inside:YES];
+  [_chrome overlayMouseMoved:aEvent];
 }
 - (void)mouseExited:(NSEvent*)aEvent {
   [_chrome overlayMouseExited];
 }
 - (void)cursorUpdate:(NSEvent*)aEvent {
   [_chrome overlayUpdateCursor:aEvent];
-}
-- (void)mouseDown:(NSEvent*)aEvent {
-  [_chrome overlayMouseDown:aEvent];
-}
-- (void)mouseDragged:(NSEvent*)aEvent {
-  [_chrome overlayMouseDragged:aEvent];
-}
-- (void)mouseUp:(NSEvent*)aEvent {
-  [_chrome overlayMouseUp:aEvent];
 }
 - (void)scrollWheel:(NSEvent*)aEvent {
   [_chrome overlayScroll:aEvent];
@@ -736,9 +991,7 @@ static NSTextField* MakeTimeLabel() {
   [_chrome overlayMagnify:aEvent];
 }
 - (void)keyDown:(NSEvent*)aEvent {
-  if (![_chrome overlayKeyDown:aEvent]) {
-    [super keyDown:aEvent];
-  }
+  [_chrome overlayKeyDown:aEvent];
 }
 - (void)layout {
   [super layout];
@@ -753,6 +1006,7 @@ static NSTextField* MakeTimeLabel() {
 // Passes clicks on empty space through to the overlay (the drag surface).
 @interface ZenPipPassthroughView : NSView
 @end
+
 @implementation ZenPipPassthroughView
 - (NSView*)hitTest:(NSPoint)aPoint {
   NSView* hit = [super hitTest:aPoint];
@@ -764,12 +1018,21 @@ static NSTextField* MakeTimeLabel() {
 
 typedef NS_ENUM(NSInteger, ZenPipGesture) {
   ZenPipGestureNone,
-  ZenPipGesturePending,  // mouse down, not yet past the drag threshold
+  ZenPipGesturePending,  // pressed, not yet past the drag threshold
   ZenPipGestureDrag,
   ZenPipGestureResize,
   ZenPipGestureCarry,  // two-finger scroll
   ZenPipGesturePinch,
 };
+
+static void* const kVoiceOverContext = (void*)&kVoiceOverContext;
+
+// Every attached player, so that several of them keep out of each other's
+// way (corners, stash tabs).
+static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
+  static NSHashTable* players = [NSHashTable weakObjectsHashTable];
+  return players;
+}
 
 @implementation ZenPipPlayerChrome {
   ChromeHost* mHost;
@@ -777,50 +1040,57 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   __weak NSWindow* mSourceWindow;
   __weak NSResponder* mPreviousFirstResponder;
   BOOL mWasMovable;
+  BOOL mObserving;
   BOOL mInvalidated;
 
   Config mConfig;
   Appearance mAppearance;
+  // Test-only overrides of the system accessibility display options.
+  NSDictionary<NSString*, NSNumber*>* mSimulatedAppearance;
   NSDictionary<NSString*, NSString*>* mStrings;
 
   ZenPipOverlayView* mOverlay;
   NSView* mScrim;
-  NSView* mControlsRoot;     // NSGlassEffectContainerView (26+) or plain view
+  NSView* mControlsRoot;  // NSGlassEffectContainerView (26+) or plain view
   ZenPipPassthroughView* mControls;
-  ZenPipGlassControl* mClose;
-  ZenPipGlassControl* mMinimize;
   ZenPipGlassControl* mSpeed;
   ZenPipGlassControl* mCaptions;
   ZenPipGlassControl* mSound;
   ZenPipGlassControl* mReturn;
+  ZenPipGlassControl* mMinimize;
+  ZenPipGlassControl* mClose;
   ZenPipGlassControl* mBack;
   ZenPipGlassControl* mPlay;
   ZenPipGlassControl* mForward;
   // "● Live" for live streams: a status badge, or a "go to live" button beside
   // the timeline when the stream can be scrubbed.
   ZenPipGlassControl* mLiveBadge;
+  ZenPipSpinner* mSpinner;
   ZenPipTimeline* mTimeline;
-  ZenPipTuckPanel* mTuckPanel;
-  NSString* mSpeedSymbol;  // as last drawn
-  // Takes every press on the resize border (see init).
-  id mClickMonitor;
-  BOOL mOwnsBorderPress;  // its drags and its release come here too
+  CGFloat mSymbolScale;  // the symbols were last drawn at
+  // Takes every press in the player outside its controls (see -filterPress:).
+  id mPressMonitor;
+  BOOL mOwnsPress;  // its drags and its release come here too
 
   // Playback state mirrored from the original video.
   BOOL mPlaying;
   BOOL mMuted;
+  double mVolume;
   double mRate;
   double mCurrentTime;
   double mDuration;
   BOOL mSeekable;
   BOOL mLive;
-  // A scrubbable live stream is playing at its live edge (red dot).
-  BOOL mAtLiveEdge;
-  BOOL mLiveDotRed;  // as last drawn
+  BOOL mAtLiveEdge;  // a scrubbable live stream plays at its live edge
+  BOOL mBuffering;
+  BOOL mShowsSpinner;
+  BOOL mEnded;
   BOOL mCaptionsAvailable;
   BOOL mCaptionsEnabled;
   NSString* mCaptionSize;
   double mAspect;
+  BOOL mAspectPending;  // the video changed size while the player was busy
+  NSTimer* mSpinnerTimer;
 
   // Controls visibility.
   BOOL mControlsVisible;
@@ -829,37 +1099,41 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL mScrubbing;
   BOOL mMenuOpen;
   NSTimer* mHideTimer;
-  CFTimeInterval mLastActivity;
+  CFTimeInterval mHideAt;  // when the controls may hide, absent other reasons
 
   // Motion.
   ZenPipGesture mGesture;
+  BOOL mGestureMoved;  // past the drag threshold; otherwise a click
+  BOOL mCaughtMoving;  // the press stopped the player mid-flight
   NSPoint mGestureStartMouse;
   NSRect mGestureStartFrame;
   ResizeHandle mResizeHandle;
   Dock mGestureDock;
   double mPinchScale;
+  BOOL mPushingEdge;  // the drag pushes past an edge of the display
+  HEdge mStashArmed;  // released now, the player would stash on that side
   std::vector<PointerSample> mSamples;
   Spring2D mSpring;
   CFTimeInterval mSpringStart;
   CADisplayLink* mDisplayLink API_AVAILABLE(macos(14.0));
   NSTimer* mFallbackAnimationTimer;
-  BOOL mAnimating;
-  BOOL mIgnoreMomentum;
-  BOOL mTucked;
-  BOOL mTuckTransition;
-  NSRect mFrameBeforeTuck;
-  Dock mLastDock;
+  NSInteger mFrameAnimations;  // AppKit frame animations in flight
+  BOOL mSettingFrame;          // the chrome itself is moving the window
+  Dock mRestDock;              // where it last came, or is coming, to rest
+  BOOL mExiting;
 
-  NSMutableArray<id>* mObservers;
-  NSMutableArray<id>* mWorkspaceObservers;
-  // Test-only overrides of the system accessibility display options (set via
-  // setConfiguration; never used in normal operation).
-  NSDictionary<NSString*, NSNumber*>* mSimulatedAppearance;
+  // Stashed into a side of its display, leaving a tab.
+  BOOL mStashed;
+  HEdge mStashSide;
+  NSRect mFrameBeforeStash;
+  ZenPipStashTab* mTab;
+
   // Display the user dragged the player onto (0: follow the source window).
   CGDirectDisplayID mHomeDisplay;
-  // Pushing at the edge toward another display: since when (event time, 0 if
-  // not), and a one-shot check at the end of the hold for a pointer at rest.
+  // Pushing at the edge toward another display: since when (event time), and
+  // a one-shot timer that ends the hold for a pointer at rest.
   NSTimeInterval mEdgeHoldStart;
+  BOOL mEdgeHoldElapsed;
   NSTimer* mEdgeHoldTimer;
   NSPoint mLastGesturePoint;
 }
@@ -874,25 +1148,20 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 - (nullable instancetype)initWithPlayerWindow:(NSWindow*)aWindow
                                          host:(ChromeHost*)aHost {
   NSView* content = aWindow.contentView;
-  if (!aWindow || !aHost || !content) {
-    return nil;
-  }
-  if (!(self = [super init])) {
+  if (!content || !aHost || !(self = [super init])) {
     return nil;
   }
   mHost = aHost;
   mWindow = aWindow;
   mRate = 1;
+  mVolume = 1;
   mAtLiveEdge = YES;
   mDuration = NAN;
-  mAspect = aWindow.frame.size.height > 0
-                ? aWindow.frame.size.width / aWindow.frame.size.height
-                : 16.0 / 9.0;
+  NSSize size = aWindow.frame.size;
+  mAspect = size.height > 0 ? size.width / size.height : 16.0 / 9;
   mCaptionSize = @"medium";
   mStrings = @{};
   mAppearance = CurrentAppearance();
-  mObservers = [NSMutableArray array];
-  mWorkspaceObservers = [NSMutableArray array];
 
   [self buildOverlayInView:content];
 
@@ -900,32 +1169,32 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   // the system must not start its own window drags from the titlebar area.
   mWasMovable = aWindow.movable;
   aWindow.movable = NO;
-  for (NSWindowButton b : {NSWindowCloseButton, NSWindowMiniaturizeButton,
-                           NSWindowZoomButton}) {
+  // The player stays on screen when Zen is hidden (Command-H), so the video
+  // stays in view while the user works in another app.
+  aWindow.canHide = NO;
+  for (NSWindowButton b :
+       {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton}) {
     [aWindow standardWindowButton:b].hidden = YES;
   }
   mPreviousFirstResponder = aWindow.firstResponder;
   [aWindow makeFirstResponder:mOverlay];
 
-  // The chrome resizes the player from its whole border itself, so presses
-  // there never reach AppKit. AppKit would resize from its own edge and
-  // corner areas with its own anchoring, and it grows the window toward the
-  // screen corner whenever two presses land on a corner within the
-  // double-click interval (it times them itself; the click count is ignored).
-  __weak ZenPipPlayerChrome* weakChrome = self;
-  mClickMonitor = [NSEvent
+  __weak ZenPipPlayerChrome* weakSelf = self;
+  mPressMonitor = [NSEvent
       addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown |
                                            NSEventMaskLeftMouseDragged |
                                            NSEventMaskLeftMouseUp
                                    handler:^NSEvent*(NSEvent* aEvent) {
-                                     ZenPipPlayerChrome* chrome = weakChrome;
-                                     return chrome ? [chrome filterBorderPress:aEvent] : aEvent;
+                                     ZenPipPlayerChrome* chrome = weakSelf;
+                                     return chrome ? [chrome filterPress:aEvent]
+                                                   : aEvent;
                                    }];
 
+  [AllPlayers() addObject:self];
   [self observeNotifications];
-  [self applyAppearance];
   [self refreshAllControls];
   [self settleAnimated:NO];
+  [self moveClearOfOtherPlayers];
   // Before the first reveal, so captions are placed with the system style.
   [self notifyCaptionStyle];
   [self revealControlsFor:kInitialRevealDuration];
@@ -933,7 +1202,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)notifyCaptionStyle {
-  [self notifyHost:"caption-style" value:0 detail:JSONString(SystemCaptionStyle())];
+  [self notifyHost:"caption-style"
+             value:0
+            detail:JSONString(SystemCaptionStyle())];
 }
 
 - (void)dealloc {
@@ -943,8 +1214,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 #pragma mark Building
 
 - (ZenPipGlassControl*)addControl:(SEL)aAction {
-  ZenPipGlassControl* control = [[ZenPipGlassControl alloc] initWithTarget:self
-                                                                    action:aAction];
+  ZenPipGlassControl* control =
+      [[ZenPipGlassControl alloc] initWithTarget:self
+                                          action:aAction
+                                      clearGlass:YES];
   [mControls addSubview:control];
   return control;
 }
@@ -957,13 +1230,13 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mOverlay.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
   mOverlay.accessibilityElement = NO;
 
-  // Apple's dark dimming layer under Clear glass over bright media: a uniform
-  // 35% black, shown with the controls.
+  // Shown with the controls (see kDimmingOpacity).
   mScrim = [[NSView alloc] initWithFrame:mOverlay.bounds];
   mScrim.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   mScrim.wantsLayer = YES;
   CALayer* dimming = [CALayer layer];
-  dimming.backgroundColor = [NSColor colorWithWhite:0 alpha:kDimmingOpacity].CGColor;
+  dimming.backgroundColor =
+      [NSColor colorWithWhite:0 alpha:kDimmingOpacity].CGColor;
   mScrim.layer = dimming;
   mScrim.alphaValue = 0;
   mScrim.hidden = YES;
@@ -988,10 +1261,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mControlsRoot.hidden = YES;
   [mOverlay addSubview:mControlsRoot];
 
-  // Created in reading order, which VoiceOver follows: playback options on the
-  // left (speed, captions, sound), window controls on the right (back to tab,
-  // minimize, close).
+  // Created in reading order, which VoiceOver follows: playback options
+  // (speed, captions, sound), window controls (back to tab, minimize, close).
   mSpeed = [self addControl:@selector(onSpeed:)];
+  mSpeed.button.imagePosition = NSNoImage;
   mCaptions = [self addControl:@selector(onCaptions:)];
   mSound = [self addControl:@selector(onSound:)];
   mReturn = [self addControl:@selector(onReturn:)];
@@ -1001,21 +1274,22 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mPlay = [self addControl:@selector(onPlay:)];
   mForward = [self addControl:@selector(onForward:)];
   mLiveBadge = [self addControl:@selector(onLive:)];
-  mLiveBadge.capsule = YES;
   mLiveBadge.hidden = YES;
   mLiveBadge.button.imageHugsTitle = YES;
-  mTimeline = [[ZenPipTimeline alloc] initWithTarget:self action:@selector(onScrub:)];
+  mTimeline = [[ZenPipTimeline alloc] initWithTarget:self
+                                              action:@selector(onScrub:)];
   [mControls addSubview:mTimeline];
+
+  mSpinner = [[ZenPipSpinner alloc] initWithFrame:NSZeroRect];
+  mSpinner.style = NSProgressIndicatorStyleSpinning;
+  mSpinner.displayedWhenStopped = NO;
+  mSpinner.appearance = mOverlay.appearance;
+  [mPlay addSubview:mSpinner];
 
   // Captions get extra options from a context menu (right/control click).
   NSMenu* captionsMenu = [[NSMenu alloc] init];
-  captionsMenu.delegate = (id<NSMenuDelegate>)self;
+  captionsMenu.delegate = self;
   mCaptions.button.menu = captionsMenu;
-
-  NSArray<NSView*>* order = [self keyboardOrder];
-  for (NSUInteger i = 0; i < order.count; i++) {
-    order[i].nextKeyView = order[(i + 1) % order.count];
-  }
 
   [aContent addSubview:mOverlay positioned:NSWindowAbove relativeTo:nil];
 }
@@ -1024,103 +1298,110 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (void)observeNotifications {
   NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
-  __weak ZenPipPlayerChrome* weakSelf = self;
   NSWindow* window = mWindow;
-  [mObservers addObject:[nc addObserverForName:NSWindowWillCloseNotification
-                                        object:window
-                                         queue:nil
-                                    usingBlock:^(NSNotification*) {
-                                      ZenPipPlayerChrome* chrome = weakSelf;
-                                      if (chrome) {
-                                        [chrome notifyHost:"window-will-close"
-                                                     value:0
-                                                    detail:nil];
-                                        [chrome invalidate];
-                                      }
-                                    }]];
-  // A system edge resize (outside our own handles) re-anchors when done.
-  [mObservers addObject:[nc addObserverForName:NSWindowDidEndLiveResizeNotification
-                                        object:window
-                                         queue:nil
-                                    usingBlock:^(NSNotification*) {
-                                      [weakSelf settleAnimated:YES];
-                                    }]];
-  [mObservers addObject:[nc addObserverForName:NSWindowDidChangeOcclusionStateNotification
-                                        object:window
-                                         queue:nil
-                                    usingBlock:^(NSNotification*) {
-                                      [weakSelf windowVisibilityChanged];
-                                    }]];
-  // Display added/removed/rearranged, resolution or Dock changes.
-  [mObservers addObject:[nc addObserverForName:NSApplicationDidChangeScreenParametersNotification
-                                        object:nil
-                                         queue:nil
-                                    usingBlock:^(NSNotification*) {
-                                      [weakSelf settleAnimated:YES];
-                                    }]];
+  [nc addObserver:self
+         selector:@selector(windowWillClose:)
+             name:NSWindowWillCloseNotification
+           object:window];
+  [nc addObserver:self
+         selector:@selector(windowFrameChanged:)
+             name:NSWindowDidMoveNotification
+           object:window];
+  [nc addObserver:self
+         selector:@selector(windowFrameChanged:)
+             name:NSWindowDidResizeNotification
+           object:window];
+  [nc addObserver:self
+         selector:@selector(windowOcclusionChanged:)
+             name:NSWindowDidChangeOcclusionStateNotification
+           object:window];
+  // Display added/removed/rearranged, resolution, Dock or menu bar changes.
+  [nc addObserver:self
+         selector:@selector(screensChanged:)
+             name:NSApplicationDidChangeScreenParametersNotification
+           object:nil];
   // System Settings > Accessibility > Captions changed.
-  [mObservers
-      addObject:[nc addObserverForName:(__bridge NSString*)kMACaptionAppearanceSettingsChangedNotification
-                                object:nil
-                                 queue:nil
-                            usingBlock:^(NSNotification*) {
-                              [weakSelf notifyCaptionStyle];
-                            }]];
-
-  NSNotificationCenter* wnc = NSWorkspace.sharedWorkspace.notificationCenter;
-  [mWorkspaceObservers
-      addObject:[wnc addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
-                                 object:nil
-                                  queue:nil
-                             usingBlock:^(NSNotification*) {
-                               [weakSelf appearanceChanged];
-                             }]];
+  [nc addObserver:self
+         selector:@selector(notifyCaptionStyle)
+             name:(__bridge NSString*)
+                      kMACaptionAppearanceSettingsChangedNotification
+           object:nil];
+  [NSWorkspace.sharedWorkspace.notificationCenter
+      addObserver:self
+         selector:@selector(appearanceChanged)
+             name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+           object:nil];
   [NSWorkspace.sharedWorkspace addObserver:self
                                 forKeyPath:@"voiceOverEnabled"
                                    options:0
-                                   context:nullptr];
+                                   context:kVoiceOverContext];
+  mObserving = YES;
 }
 
 - (void)observeValueForKeyPath:(NSString*)aKeyPath
                       ofObject:(id)aObject
                         change:(NSDictionary*)aChange
                        context:(void*)aContext {
+  if (aContext != kVoiceOverContext) {
+    [super observeValueForKeyPath:aKeyPath
+                         ofObject:aObject
+                           change:aChange
+                          context:aContext];
+    return;
+  }
   [self appearanceChanged];
 }
 
-- (Appearance)effectiveAppearance {
-  Appearance a = CurrentAppearance();
-  if (NSNumber* v = mSimulatedAppearance[@"reduceMotion"]) a.reduceMotion = v.boolValue;
-  if (NSNumber* v = mSimulatedAppearance[@"reduceTransparency"]) a.reduceTransparency = v.boolValue;
-  if (NSNumber* v = mSimulatedAppearance[@"increaseContrast"]) a.increaseContrast = v.boolValue;
-  return a;
+- (void)windowWillClose:(NSNotification*)aNote {
+  [self notifyHost:"window-will-close" value:0 detail:nil];
+  [self invalidate];
+}
+
+// Something other than the chrome moved or resized the player (a window
+// manager, Accessibility, the Window > Zoom command): back inside its area.
+- (void)windowFrameChanged:(NSNotification*)aNote {
+  if (mSettingFrame || mGesture != ZenPipGestureNone || mStashed || mExiting ||
+      [self isAnimating]) {
+    return;
+  }
+  [NSObject
+      cancelPreviousPerformRequestsWithTarget:self
+                                     selector:@selector(
+                                                  settleAfterExternalChange)
+                                       object:nil];
+  [self performSelector:@selector(settleAfterExternalChange)
+             withObject:nil
+             afterDelay:0.15];
+}
+
+- (void)settleAfterExternalChange {
+  mRestDock =
+      DetectDock(ToRect(mWindow.frame), [self allowedArea], kDockTolerance);
+  [self settleAnimated:YES];
+}
+
+- (void)screensChanged:(NSNotification*)aNote {
+  if (mStashed) {
+    [self placeTabAt:NSMinY(mTab.frame)];
+  } else {
+    [self settleAnimated:YES];
+  }
 }
 
 - (void)appearanceChanged {
-  mAppearance = [self effectiveAppearance];
-  [self applyAppearance];
+  mAppearance = CurrentAppearance();
+  if (NSNumber* v = mSimulatedAppearance[@"reduceMotion"]) {
+    mAppearance.reduceMotion = v.boolValue;
+  }
+  if (NSNumber* v = mSimulatedAppearance[@"increaseContrast"]) {
+    mAppearance.increaseContrast = v.boolValue;
+  }
+  [self refreshAllControls];
   if (mAppearance.voiceOver) {
     [self showControls];
   } else {
     [self scheduleHide];
   }
-}
-
-- (void)applyAppearance {
-  // Clear glass in every mode (see ApplyGlass): the system itself makes it
-  // frostier for Reduce Transparency and black/white with a border for
-  // Increase Contrast. Only the symbol weight follows Increase Contrast here.
-  for (ZenPipGlassControl* c in [self allGlassControls]) {
-    [c setClearGlass:YES];
-  }
-  [mTimeline setClearGlass:YES];
-  [mTuckPanel.control setClearGlass:NO];
-  [self refreshAllControls];
-}
-
-- (NSArray<ZenPipGlassControl*>*)allGlassControls {
-  return @[ mClose, mMinimize, mSpeed, mCaptions, mSound, mReturn, mBack, mPlay,
-            mForward, mLiveBadge ];
 }
 
 // The visual reading order, which Tab follows. Since macOS 26 AppKit inserts
@@ -1139,7 +1420,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // wrapping around. From outside the controls, Tab starts at play/pause.
 - (void)moveKeyboardFocusBackwards:(BOOL)aBackwards {
   NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (mStashed) {
     return;
   }
   [self showControls];
@@ -1147,18 +1428,21 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSResponder* responder = window.firstResponder;
   NSInteger current = NSNotFound;
   for (NSUInteger i = 0; i < order.count; i++) {
-    if ([responder isKindOfClass:[NSView class]] && [(NSView*)responder isDescendantOf:order[i]]) {
+    if ([responder isKindOfClass:[NSView class]] &&
+        [(NSView*)responder isDescendantOf:order[i]]) {
       current = i;
       break;
     }
   }
   NSInteger count = order.count;
-  NSInteger start = current != NSNotFound ? current : [order indexOfObject:mPlay.button];
+  NSInteger start =
+      current != NSNotFound ? current : [order indexOfObject:mPlay.button];
   if (current == NSNotFound && !aBackwards) {
     start -= 1;  // land on play/pause itself
   }
   for (NSInteger step = 1; step <= count; step++) {
-    NSView* candidate = order[((start + (aBackwards ? -step : step)) % count + count) % count];
+    NSView* candidate =
+        order[((start + (aBackwards ? -step : step)) % count + count) % count];
     if (candidate.canBecomeKeyView) {
       [window makeFirstResponder:candidate];
       return;
@@ -1169,16 +1453,24 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // Names used by debugState, focusedControlName and the test hooks.
 - (NSDictionary<NSString*, ZenPipGlassControl*>*)namedControls {
   return @{
-    @"close" : mClose, @"minimize" : mMinimize, @"speed" : mSpeed,
-    @"captions" : mCaptions, @"sound" : mSound, @"return" : mReturn,
-    @"back15" : mBack, @"playPause" : mPlay, @"forward15" : mForward,
+    @"close" : mClose,
+    @"minimize" : mMinimize,
+    @"speed" : mSpeed,
+    @"captions" : mCaptions,
+    @"sound" : mSound,
+    @"return" : mReturn,
+    @"back15" : mBack,
+    @"playPause" : mPlay,
+    @"forward15" : mForward,
     @"live" : mLiveBadge
   };
 }
 
 #pragma mark Host
 
-- (void)notifyHost:(const char*)aAction value:(double)aValue detail:(NSString*)aDetail {
+- (void)notifyHost:(const char*)aAction
+             value:(double)aValue
+            detail:(NSString*)aDetail {
   if (mHost && !mInvalidated) {
     mHost->OnChromeAction(aAction, aValue, aDetail ? aDetail.UTF8String : "");
   }
@@ -1208,32 +1500,91 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self refreshSoundButton];
 }
 
+- (void)setVolume:(double)aVolume {
+  if (!std::isfinite(aVolume)) {
+    return;
+  }
+  mVolume = std::clamp(aVolume, 0.0, 1.0);
+  [self refreshSoundButton];
+}
+
 - (void)setPlaybackRate:(double)aRate {
   if (!std::isfinite(aRate) || aRate <= 0) {
     return;
   }
   mRate = aRate;
   [self refreshSpeedButton];
-  mOverlay.needsLayout = YES;
+  mOverlay.needsLayout = YES;  // the speed capsule fits its number
+}
+
+- (void)setBuffering:(BOOL)aBuffering ended:(BOOL)aEnded {
+  if (aEnded != mEnded) {
+    mEnded = aEnded;
+    [self refreshPlayButton];
+  }
+  if (aBuffering == mBuffering) {
+    return;
+  }
+  mBuffering = aBuffering;
+  [mSpinnerTimer invalidate];
+  mSpinnerTimer = nil;
+  if (!aBuffering) {
+    [self showSpinner:NO];
+    return;
+  }
+  __weak ZenPipPlayerChrome* weakSelf = self;
+  mSpinnerTimer =
+      [NSTimer scheduledTimerWithTimeInterval:kSpinnerDelay
+                                      repeats:NO
+                                        block:^(NSTimer*) {
+                                          ZenPipPlayerChrome* chrome = weakSelf;
+                                          if (chrome && chrome->mBuffering) {
+                                            [chrome showSpinner:YES];
+                                          }
+                                        }];
+}
+
+- (void)setLoadedFraction:(double)aFraction {
+  ZenPipSliderCell* cell = (ZenPipSliderCell*)mTimeline.slider.cell;
+  if (std::abs(cell.loadedFraction - aFraction) < 0.005) {
+    return;
+  }
+  cell.loadedFraction =
+      std::isfinite(aFraction) ? std::min(aFraction, 1.0) : -1;
+  mTimeline.slider.needsDisplay = YES;
+}
+
+- (void)showSpinner:(BOOL)aShow {
+  if (aShow == mShowsSpinner) {
+    return;
+  }
+  mShowsSpinner = aShow;
+  if (aShow) {
+    [mSpinner startAnimation:nil];
+  } else {
+    [mSpinner stopAnimation:nil];
+  }
+  [self refreshPlayButton];
 }
 
 - (void)setCurrentTime:(double)aCurrentTime
               duration:(double)aDuration
               seekable:(BOOL)aSeekable
                   live:(BOOL)aLive {
-  BOOL layoutChange = aSeekable != mSeekable || aLive != mLive ||
-                      FormatTime(aDuration).length != FormatTime(mDuration).length;
+  BOOL layoutChange =
+      aSeekable != mSeekable || aLive != mLive ||
+      FormatTime(aDuration).length != FormatTime(mDuration).length;
   mCurrentTime = aCurrentTime;
   mDuration = aDuration;
   mSeekable = aSeekable;
   mLive = aLive;
-  if (!mControlsVisible && !layoutChange) {
+  if (layoutChange) {
+    [self refreshLiveBadge];
+    mOverlay.needsLayout = YES;
+  } else if (!mControlsVisible) {
     return;  // nothing visible to update; refreshed when shown
   }
   [self refreshTimeline];
-  if (layoutChange) {
-    mOverlay.needsLayout = YES;
-  }
 }
 
 - (void)setAtLiveEdge:(BOOL)aAtLiveEdge {
@@ -1269,41 +1620,49 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   mAspect = aspect;
+  mAspectPending = YES;
+  [self applyVideoAspect];
+}
+
+// Adopts the video's aspect, keeping about the same area and the anchor. It
+// waits while the player is being dragged, resized, animated or stashed, and
+// runs when that ends.
+- (void)applyVideoAspect {
   NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (!mAspectPending || !window || mStashed || mExiting ||
+      mGesture != ZenPipGestureNone || [self isAnimating]) {
     return;
   }
-  // Keep roughly the same area and the same anchor.
+  mAspectPending = NO;
   Box frame = ToRect(window.frame);
   Box area = [self allowedArea];
-  Dock dock = DetectDock(frame, area, 2);
-  double width = std::sqrt(frame.width * frame.height * aspect);
-  Box resized = ScaleFrame(frame, width / frame.width, aspect, dock, area,
-                            mConfig.limits);
-  [self stopAnimation];
-  [window setFrame:ToNSRect(resized) display:YES];
+  double width = std::sqrt(frame.width * frame.height * mAspect);
+  Box resized =
+      ScaleFrame(frame, width / frame.width, mAspect,
+                 DetectDock(frame, area, kDockTolerance), area, mConfig.limits);
+  [self setPlayerFrame:ToNSRect(resized)];
   window.contentAspectRatio = NSMakeSize(resized.width, resized.height);
   [self settleAnimated:YES];
 }
 
 - (void)setSourceWindow:(nullable NSWindow*)aWindow {
-  if (mSourceWindow == aWindow) {
+  NSWindow* previous = mSourceWindow;
+  if (previous == aWindow) {
     return;
   }
   NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
+  if (previous) {
+    [nc removeObserver:self
+                  name:NSWindowDidChangeScreenNotification
+                object:previous];
+  }
   NSScreen* oldScreen = [self sourceScreen];
   mSourceWindow = aWindow;
   if (aWindow) {
-    __weak ZenPipPlayerChrome* weakSelf = self;
-    [mObservers addObject:[nc addObserverForName:NSWindowDidChangeScreenNotification
-                                          object:aWindow
-                                           queue:nil
-                                      usingBlock:^(NSNotification* aNote) {
-                                        ZenPipPlayerChrome* chrome = weakSelf;
-                                        if (chrome && aNote.object == chrome->mSourceWindow) {
-                                          [chrome sourceScreenChanged];
-                                        }
-                                      }]];
+    [nc addObserver:self
+           selector:@selector(sourceScreenChanged)
+               name:NSWindowDidChangeScreenNotification
+             object:aWindow];
   }
   if (oldScreen != [self sourceScreen]) {
     [self sourceScreenChanged];
@@ -1315,34 +1674,39 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 - (void)setConfiguration:(NSDictionary<NSString*, id>*)aConfiguration {
   auto number = [&](NSString* aKey, double aFallback) {
     id value = aConfiguration[aKey];
-    return [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : aFallback;
+    return [value isKindOfClass:[NSNumber class]] ? [value doubleValue]
+                                                  : aFallback;
   };
   mConfig.edgeGap = std::clamp(number(@"edgeGap", mConfig.edgeGap), 0.0, 64.0);
-  mConfig.spring.response =
-      std::clamp(number(@"springResponse", mConfig.spring.response), 0.1, 2.0);
-  mConfig.spring.dampingRatio =
-      std::clamp(number(@"springDamping", mConfig.spring.dampingRatio), 0.3, 1.5);
-  mConfig.release.decelerationRate = std::clamp(
-      number(@"decelerationRate", mConfig.release.decelerationRate), 0.9, 0.9995);
-  mConfig.release.flickSpeed =
-      std::clamp(number(@"flickSpeed", mConfig.release.flickSpeed), 50.0, 5000.0);
-  mConfig.release.magnetDistance = std::clamp(
-      number(@"magnetDistance", mConfig.release.magnetDistance), 0.0, 200.0);
   mConfig.idleHideDelay =
       std::clamp(number(@"idleHideDelay", mConfig.idleHideDelay), 0.8, 30.0);
   mConfig.carryWithTwoFingers =
-      number(@"carryWithTwoFingers", mConfig.carryWithTwoFingers ? 1 : 0) != 0;
+      number(@"carryWithTwoFingers", mConfig.carryWithTwoFingers) != 0;
+  mConfig.rightToLeft = number(@"rightToLeft", mConfig.rightToLeft) != 0;
   id simulated = aConfiguration[@"simulateAccessibility"];
   if ([simulated isKindOfClass:[NSDictionary class]]) {
     mSimulatedAppearance = [simulated copy];
     [self appearanceChanged];
   }
+  mOverlay.needsLayout = YES;
   [self settleAnimated:NO];
 }
 
 #pragma mark Control refresh
 
+- (CGFloat)symbolScale {
+  return std::clamp<CGFloat>(mOverlay.bounds.size.width / kReferenceWidth, 0.72,
+                             1.18);
+}
+
+- (NSFontWeight)symbolWeight {
+  return mAppearance.increaseContrast ? NSFontWeightBold : NSFontWeightSemibold;
+}
+
+// Symbols and labels for the current state, size, strings and accessibility
+// settings.
 - (void)refreshAllControls {
+  mSymbolScale = [self symbolScale];
   [self refreshLiveBadge];
   [self refreshPlayButton];
   [self refreshSoundButton];
@@ -1350,143 +1714,193 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self refreshCaptionsButton];
   [self refreshTimeline];
   [self configureButton:mClose symbol:@"xmark" key:@"close" fallback:@"Close"];
-  [self configureButton:mMinimize symbol:@"minus" key:@"minimize" fallback:@"Minimize"];
-  [self configureButton:mReturn symbol:@"pip.exit" key:@"returnToTab" fallback:@"Back to tab"];
-  [self configureButton:mBack symbol:@"gobackward.15" key:@"back15"
+  [self configureButton:mMinimize
+                 symbol:@"minus"
+                    key:@"minimize"
+               fallback:@"Minimize"];
+  [self configureButton:mReturn
+                 symbol:@"pip.exit"
+                    key:@"returnToTab"
+               fallback:@"Back to tab"];
+  [self configureButton:mBack
+                 symbol:@"gobackward.15"
+                    key:@"back15"
                fallback:@"Back 15 seconds"];
-  [self configureButton:mForward symbol:@"goforward.15" key:@"forward15"
+  [self configureButton:mForward
+                 symbol:@"goforward.15"
+                    key:@"forward15"
                fallback:@"Forward 15 seconds"];
-  if (mTuckPanel) {
-    NSString* label = [self string:@"restore" fallback:@"Show Picture-in-Picture"];
-    mTuckPanel.control.button.accessibilityLabel = label;
-    mTuckPanel.control.button.toolTip = label;
-  }
+  [self refreshTab];
   mOverlay.needsLayout = YES;
-}
-
-- (CGFloat)symbolScale {
-  return std::clamp<CGFloat>(mOverlay.bounds.size.width / kReferenceWidth, 0.72, 1.18);
 }
 
 - (void)configureButton:(ZenPipGlassControl*)aControl
                  symbol:(NSString*)aSymbol
                     key:(NSString*)aKey
                fallback:(NSString*)aFallback {
-  CGFloat s = [self symbolScale];
-  CGFloat point = aControl == mPlay      ? 23 * s
+  [self configureButton:aControl
+                 symbol:aSymbol
+          variableValue:-1
+                    key:aKey
+               fallback:aFallback];
+}
+
+- (void)configureButton:(ZenPipGlassControl*)aControl
+                 symbol:(NSString*)aSymbol
+          variableValue:(double)aValue
+                    key:(NSString*)aKey
+               fallback:(NSString*)aFallback {
+  CGFloat s = mSymbolScale;
+  CGFloat point = aControl == mPlay                             ? 23 * s
                   : (aControl == mBack || aControl == mForward) ? 17 * s
-                                                               : 13 * s;
-  NSFontWeight weight = mAppearance.increaseContrast ? NSFontWeightBold
-                                                     : NSFontWeightSemibold;
-  CGFloat size = std::max<CGFloat>(point, 11);
-  if (aControl == mSpeed) {
-    size *= 1.12;  // the gauge glyph is optically smaller than its neighbors'
-  }
-  NSImage* image = Symbol(aSymbol, size, weight);
+                                                                : 13 * s;
   NSString* label = [self string:aKey fallback:aFallback];
-  aControl.button.image = image;
-  aControl.button.title = image ? @"" : label;
+  aControl.button.image = Symbol(aSymbol, std::max<CGFloat>(point, 11),
+                                 [self symbolWeight], aValue);
   aControl.button.accessibilityLabel = label;
   aControl.button.toolTip = label;
 }
 
 - (void)refreshPlayButton {
   if (mPlaying) {
-    [self configureButton:mPlay symbol:@"pause.fill" key:@"pause" fallback:@"Pause"];
+    [self configureButton:mPlay
+                   symbol:@"pause.fill"
+                      key:@"pause"
+                 fallback:@"Pause"];
+  } else if (mEnded) {
+    [self configureButton:mPlay
+                   symbol:@"arrow.counterclockwise"
+                      key:@"replay"
+                 fallback:@"Replay"];
   } else {
-    [self configureButton:mPlay symbol:@"play.fill" key:@"play" fallback:@"Play"];
+    [self configureButton:mPlay
+                   symbol:@"play.fill"
+                      key:@"play"
+                 fallback:@"Play"];
+  }
+  if (mShowsSpinner) {
+    mPlay.button.image = nil;  // the spinner takes the symbol's place
   }
 }
 
 - (void)refreshSoundButton {
-  if (mMuted) {
-    [self configureButton:mSound symbol:@"speaker.slash.fill" key:@"unmute"
-                 fallback:@"Unmute"];
+  NSString* key = mMuted ? @"unmute" : @"mute";
+  NSString* fallback = mMuted ? @"Unmute" : @"Mute";
+  if (mMuted || mVolume <= 0) {
+    [self configureButton:mSound
+                   symbol:@"speaker.slash.fill"
+                      key:key
+                 fallback:fallback];
   } else {
-    [self configureButton:mSound symbol:@"speaker.wave.2.fill" key:@"mute"
-                 fallback:@"Mute"];
+    // The waves fill with the volume.
+    [self configureButton:mSound
+                   symbol:@"speaker.wave.3.fill"
+            variableValue:mVolume
+                      key:key
+                 fallback:fallback];
   }
 }
 
 - (void)refreshCaptionsButton {
-  NSString* key = !mCaptionsAvailable ? @"captionsUnavailable"
-                  : mCaptionsEnabled  ? @"captionsOff"
-                                      : @"captionsOn";
-  NSString* fallback = !mCaptionsAvailable ? @"Captions unavailable"
-                       : mCaptionsEnabled  ? @"Hide captions"
-                                           : @"Show captions";
+  NSString* key = !mCaptionsAvailable ? @"subtitlesUnavailable"
+                  : mCaptionsEnabled  ? @"subtitlesOff"
+                                      : @"subtitlesOn";
+  NSString* fallback = !mCaptionsAvailable ? @"No subtitles"
+                       : mCaptionsEnabled  ? @"Hide subtitles"
+                                           : @"Show subtitles";
   [self configureButton:mCaptions
-                 symbol:mCaptionsEnabled && mCaptionsAvailable ? @"captions.bubble.fill"
-                                                               : @"captions.bubble"
+                 symbol:mCaptionsEnabled && mCaptionsAvailable
+                            ? @"captions.bubble.fill"
+                            : @"captions.bubble"
                     key:key
                fallback:fallback];
   mCaptions.button.enabled = mCaptionsAvailable;
   mCaptions.alphaValue = mCaptionsAvailable ? 1 : 0.45;
 }
 
+// The speed button shows the speed itself ("1×", "1.5×").
 - (void)refreshSpeedButton {
-  NSString* symbol = SpeedSymbolName(mRate);
-  [self configureButton:mSpeed symbol:symbol key:@"speed" fallback:@"Playback speed"];
-  if (!mSpeed.button.image) {
-    // The needle positions are new in macOS 13; before that, a plain gauge.
-    symbol = @"speedometer";
-    [self configureButton:mSpeed symbol:symbol key:@"speed" fallback:@"Playback speed"];
-  }
-  mSpeedSymbol = symbol;
   NSString* rate = FormatRate(mRate);
+  NSFont* font = [NSFont
+      monospacedDigitSystemFontOfSize:std::max<CGFloat>(12.5 * mSymbolScale, 11)
+                               weight:[self symbolWeight]];
+  mSpeed.button.attributedTitle = [[NSAttributedString alloc]
+      initWithString:rate
+          attributes:@{
+            NSFontAttributeName : font,
+            NSForegroundColorAttributeName : NSColor.whiteColor
+          }];
+  NSString* label = [self string:@"speed" fallback:@"Playback speed"];
+  mSpeed.button.accessibilityLabel = label;
   mSpeed.button.accessibilityValueDescription = rate;
-  mSpeed.button.toolTip = [NSString
-      stringWithFormat:@"%@ (%@)", [self string:@"speed" fallback:@"Playback speed"], rate];
+  mSpeed.button.toolTip = label;
+}
+
+- (CGFloat)speedWidthForHeight:(CGFloat)aHeight {
+  return std::max(aHeight, ceil(mSpeed.button.attributedTitle.size.width) +
+                               round(aHeight * 0.35));
+}
+
+- (BOOL)isSeekable {
+  return mSeekable && std::isfinite(mDuration) && mDuration > 0;
+}
+
+// Speeds above normal can't do anything at a live stream's live edge.
+- (BOOL)isRateBlocked:(double)aRate {
+  return mLive && (![self isSeekable] || mAtLiveEdge) && aRate > 1 &&
+         !SameRate(aRate, 1);
 }
 
 - (void)refreshTimeline {
-  BOOL showTimeline = mSeekable && std::isfinite(mDuration) && mDuration > 0;
-  if (showTimeline) {
+  if ([self isSeekable]) {
     if (!mScrubbing) {
-      mTimeline.slider.doubleValue = std::clamp(mCurrentTime / mDuration, 0.0, 1.0);
+      mTimeline.slider.doubleValue =
+          std::clamp(mCurrentTime / mDuration, 0.0, 1.0);
     }
-    double shownTime = mScrubbing ? mTimeline.slider.doubleValue * mDuration : mCurrentTime;
+    double shownTime =
+        mScrubbing ? mTimeline.slider.doubleValue * mDuration : mCurrentTime;
     mTimeline.elapsed.stringValue = FormatTime(shownTime);
     mTimeline.duration.stringValue = FormatTime(mDuration);
     mTimeline.slider.hidden = NO;
-    mTimeline.slider.accessibilityLabel = [self string:@"timeline" fallback:@"Playback position"];
+    mTimeline.slider.accessibilityLabel = [self string:@"timeline"
+                                              fallback:@"Playback position"];
     if (mLive) {
       // A DVR window: like YouTube, no times on screen (the window's start is
       // arbitrary); VoiceOver hears how far behind live the position is.
       mTimeline.slider.accessibilityValueDescription =
           mAtLiveEdge && !mScrubbing
               ? [self string:@"live" fallback:@"Live"]
-              : [NSString stringWithFormat:@"%@ %@", FormatTime(std::max(0.0, mDuration - shownTime)),
-                                           [self string:@"behindLive" fallback:@"behind live"]];
+              : FillTemplate([self string:@"behindLive"
+                                 fallback:@"%1$@ behind live"],
+                             FormatTime(std::max(0.0, mDuration - shownTime)));
     } else {
-      NSString* of = [self string:@"timeOf" fallback:@"of"];
       mTimeline.slider.accessibilityValueDescription =
-          [NSString stringWithFormat:@"%@ %@ %@", FormatTime(shownTime), of,
-                                     FormatTime(mDuration)];
+          FillTemplate([self string:@"timePosition" fallback:@"%1$@ of %2$@"],
+                       FormatTime(shownTime), FormatTime(mDuration));
     }
   } else {
     mTimeline.slider.hidden = YES;
-    mTimeline.elapsed.stringValue =
-        mLive ? [self string:@"live" fallback:@"Live"] : FormatTime(mCurrentTime);
+    mTimeline.elapsed.stringValue = mLive
+                                        ? [self string:@"live" fallback:@"Live"]
+                                        : FormatTime(mCurrentTime);
     mTimeline.duration.stringValue = @"";
   }
 }
 
-// The Live badge follows YouTube's live button: red dot at the live edge,
-// grey when behind; it only acts as a button when the stream can be scrubbed.
+// The Live badge follows YouTube's live button: red at the live edge, grey
+// when behind; it only acts as a button when the stream can be scrubbed.
 - (void)refreshLiveBadge {
-  BOOL scrubbable = mLive && mSeekable && std::isfinite(mDuration) && mDuration > 0;
+  BOOL scrubbable = mLive && [self isSeekable];
   BOOL atEdge = !scrubbable || mAtLiveEdge;
-  mLiveDotRed = atEdge;
-  CGFloat point = std::max<CGFloat>(12.5 * [self symbolScale], 11);
-  NSFont* font = [NSFont systemFontOfSize:point
-                                   weight:mAppearance.increaseContrast ? NSFontWeightBold
-                                                                       : NSFontWeightSemibold];
+  CGFloat point = std::max<CGFloat>(12.5 * mSymbolScale, 11);
+  NSFont* font = [NSFont systemFontOfSize:point weight:[self symbolWeight]];
   NSString* live = [self string:@"live" fallback:@"Live"];
   NSString* goLive = [self string:@"goLive" fallback:@"Go to live"];
-  mLiveBadge.button.image =
-      LiveDotImage(atEdge ? NSColor.systemRedColor : [NSColor colorWithWhite:1 alpha:0.5],
-                   round(point * 0.56), round(point * 0.4));
+  // A filled dot at the edge and a ring behind it, so the two differ by
+  // shape as well as color.
+  mLiveBadge.button.image = LiveDotImage(
+      atEdge ? NSColor.systemRedColor : [NSColor colorWithWhite:1 alpha:0.6],
+      round(point * 0.56), round(point * 0.4), atEdge);
   mLiveBadge.button.imagePosition = NSImageLeft;
   mLiveBadge.button.attributedTitle = [[NSAttributedString alloc]
       initWithString:live
@@ -1496,7 +1910,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
           }];
   mLiveBadge.statusOnly = !scrubbable;
   mLiveBadge.button.accessibilityLabel = scrubbable ? goLive : live;
-  mLiveBadge.button.accessibilityValueDescription = scrubbable && atEdge ? live : nil;
+  mLiveBadge.button.accessibilityValueDescription =
+      scrubbable && atEdge ? live : nil;
   mLiveBadge.button.toolTip = scrubbable ? goLive : nil;
 }
 
@@ -1505,29 +1920,35 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 - (void)overlayLayout {
   NSSize size = mOverlay.bounds.size;
   CGFloat W = size.width, H = size.height;
-  CGFloat s = [self symbolScale];
+  if ([self symbolScale] != mSymbolScale) {
+    [self refreshAllControls];  // symbols are drawn for the current size
+  }
+  CGFloat s = mSymbolScale;
   CGFloat inset = std::max<CGFloat>(7, round(10 * s));
   CGFloat topD = std::max<CGFloat>(26, round(30 * s));
   CGFloat spacing = std::max<CGFloat>(6, round(8 * s));
   CGFloat playD = std::max<CGFloat>(40, round(56 * s));
   CGFloat skipD = std::max<CGFloat>(30, round(42 * s));
   CGFloat centerGap = round(30 * s);
-  BOOL seekable = mSeekable && std::isfinite(mDuration) && mDuration > 0;
+  BOOL seekable = [self isSeekable];
   CGFloat timelineH = std::max<CGFloat>(H < 150 ? 22 : 26, round(32 * s));
   if (mLive && seekable) {
     timelineH = std::max<CGFloat>(timelineH, 24);  // the Live badge is a button
   }
   BOOL showSkip = seekable && W >= 250 && H >= 150;
-  BOOL showSpeed = W >= 300;
+  // A live stream that can't be scrubbed plays at its own pace.
+  BOOL showSpeed = W >= 300 && !(mLive && !seekable);
   BOOL showCaptions = W >= 270;
   BOOL showMinimize = W >= 230;
+
+  // The corners stay concentric with the controls in them.
+  [self applyCornerRadius:topD / 2 + inset];
 
   // Bottom row. A live stream shows its Live badge at the left; the timeline
   // follows only when the stream can be scrubbed.
   CGFloat rowX = inset;
   mLiveBadge.hidden = !mLive;
   if (mLive) {
-    [self refreshLiveBadge];
     CGFloat contentW = mLiveBadge.button.image.size.width +
                        mLiveBadge.button.attributedTitle.size.width;
     mLiveBadge.frame =
@@ -1537,73 +1958,89 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   BOOL showTimeline = mLive ? seekable : (seekable || std::isfinite(mDuration));
   BOOL showLabels = !mLive && (W >= 290 || !seekable);
 
-  // Top row: playback options from the left edge, window controls against
-  // the right edge with close in the corner.
+  // Top row: playback options from the leading edge, window controls against
+  // the trailing edge with close in the corner. Right-to-left languages
+  // mirror it; the timeline and the transport row keep their direction, as
+  // in other media players.
+  BOOL rtl = mConfig.rightToLeft;
   CGFloat topY = H - inset - topD;
-  CGFloat x = inset;
+  CGFloat lead = inset;
   for (ZenPipGlassControl* c in @[ mSpeed, mCaptions, mSound ]) {
     BOOL show = c == mSpeed ? showSpeed : c == mCaptions ? showCaptions : YES;
     c.hidden = !show;
     if (!show) {
       continue;
     }
-    c.frame = NSMakeRect(x, topY, topD, topD);
-    x += topD + spacing;
+    CGFloat w = c == mSpeed ? [self speedWidthForHeight:topD] : topD;
+    c.frame = NSMakeRect(rtl ? W - lead - w : lead, topY, w, topD);
+    lead += w + spacing;
   }
   mMinimize.hidden = !showMinimize;
-  x = W - inset;
+  CGFloat trail = inset;
   for (ZenPipGlassControl* c in @[ mClose, mMinimize, mReturn ]) {
     if (c.isHidden) {
       continue;
     }
-    x -= topD;
-    c.frame = NSMakeRect(x, topY, topD, topD);
-    x -= spacing;
+    c.frame = NSMakeRect(rtl ? trail : W - trail - topD, topY, topD, topD);
+    trail += topD + spacing;
   }
 
   // Center the transport row in the space between the top row and the
   // timeline so small players never overlap them.
-  CGFloat cy = seekable || mLive ? round((inset + timelineH + topY) / 2) : round(H / 2);
-  mPlay.frame = NSMakeRect(round(W / 2 - playD / 2), round(cy - playD / 2), playD, playD);
+  CGFloat cy =
+      seekable || mLive ? round((inset + timelineH + topY) / 2) : round(H / 2);
+  mPlay.frame =
+      NSMakeRect(round(W / 2 - playD / 2), round(cy - playD / 2), playD, playD);
   mBack.hidden = !showSkip;
   mForward.hidden = !showSkip;
   mBack.frame = NSMakeRect(NSMinX(mPlay.frame) - centerGap - skipD,
                            round(cy - skipD / 2), skipD, skipD);
-  mForward.frame = NSMakeRect(NSMaxX(mPlay.frame) + centerGap, round(cy - skipD / 2),
-                              skipD, skipD);
+  mForward.frame = NSMakeRect(NSMaxX(mPlay.frame) + centerGap,
+                              round(cy - skipD / 2), skipD, skipD);
+  CGFloat spin = round(playD * 0.42);
+  mSpinner.controlSize = spin >= 24 ? NSControlSizeRegular : NSControlSizeSmall;
+  mSpinner.frame = NSMakeRect(round((playD - spin) / 2),
+                              round((playD - spin) / 2), spin, spin);
 
   mTimeline.fontSize = std::max<CGFloat>(10.5, round(12 * s * 2) / 2);
   mTimeline.showsLabels = showLabels;
   mTimeline.frame = NSMakeRect(rowX, inset, W - inset - rowX, timelineH);
   mTimeline.hidden = !showTimeline;
-
-  // Symbols are sized for the current scale.
-  [self refreshPlayButton];
-  [self refreshSoundButton];
-  [self refreshSpeedButton];
-  [self refreshCaptionsButton];
-  [self configureButton:mClose symbol:@"xmark" key:@"close" fallback:@"Close"];
-  [self configureButton:mMinimize symbol:@"minus" key:@"minimize" fallback:@"Minimize"];
-  [self configureButton:mReturn symbol:@"pip.exit" key:@"returnToTab" fallback:@"Back to tab"];
-  [self configureButton:mBack symbol:@"gobackward.15" key:@"back15"
-               fallback:@"Back 15 seconds"];
-  [self configureButton:mForward symbol:@"goforward.15" key:@"forward15"
-               fallback:@"Forward 15 seconds"];
 }
 
-- (CGFloat)timelineTopFromWindowTop {
-  CGFloat top = mTimeline.isHidden ? 0 : NSMaxY(mTimeline.frame);
-  if (!mLiveBadge.isHidden) {
-    top = std::max(top, NSMaxY(mLiveBadge.frame));
+// Rounds the player's corners with `aRadius` (instead of the system's
+// smaller window radius), so that the glass controls in them are concentric
+// with the corners.
+- (void)applyCornerRadius:(CGFloat)aRadius {
+  NSWindow* window = mWindow;
+  NSView* content = window.contentView;
+  if (!content) {
+    return;
   }
-  return mOverlay.bounds.size.height - (top > 0 ? top : NSMaxY(mTimeline.frame)) - 6;
+  content.wantsLayer = YES;
+  CALayer* layer = content.layer;
+  if (layer.masksToBounds && std::abs(layer.cornerRadius - aRadius) < 0.5) {
+    return;
+  }
+  window.opaque = NO;
+  window.backgroundColor = NSColor.clearColor;
+  layer.cornerRadius = aRadius;
+  layer.cornerCurve = kCACornerCurveContinuous;
+  layer.masksToBounds = YES;
+  [window invalidateShadow];
+}
+
+// Where the timeline's top edge is, in points from the top of the player (the
+// Live badge shares its row).
+- (CGFloat)timelineTopFromWindowTop {
+  return mOverlay.bounds.size.height - NSMaxY(mTimeline.frame) - 6;
 }
 
 #pragma mark Controls visibility
 
 - (BOOL)keyboardFocusInControls {
   NSResponder* responder = mWindow.firstResponder;
-  return [responder isKindOfClass:[NSView class]] && responder != mOverlay &&
+  return [responder isKindOfClass:[NSView class]] &&
          [(NSView*)responder isDescendantOf:mControls];
 }
 
@@ -1620,13 +2057,13 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   }
   NSPoint p = [mOverlay convertPoint:window.mouseLocationOutsideOfEventStream
                             fromView:nil];
-  NSView* hit = [mOverlay hitTest:[mOverlay convertPoint:p toView:mOverlay.superview]];
+  NSView* hit = [mOverlay hitTest:[mOverlay convertPoint:p
+                                                  toView:mOverlay.superview]];
   return hit && hit != mOverlay;
 }
 
 - (void)showControls {
-  mLastActivity = CACurrentMediaTime();
-  if (mControlsVisible || mTucked) {
+  if (mControlsVisible || mStashed || mExiting) {
     return;
   }
   mControlsVisible = YES;
@@ -1634,16 +2071,19 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mControlsRoot.hidden = NO;
   mScrim.hidden = NO;
   [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
-    ctx.duration = 0.2;
-    ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    ctx.duration = kRevealDuration;
+    ctx.timingFunction = EaseOut();
     mControlsRoot.animator.alphaValue = 1;
     mScrim.animator.alphaValue = 1;
   }];
   [self notifyHost:"controls"
              value:1
-            detail:JSONString(@{@"timelineTop" : @([self timelineTopFromWindowTop])})];
+            detail:JSONString(
+                       @{@"timelineTop" : @([self timelineTopFromWindowTop])})];
 }
 
+// Hides the controls, quickly when the pointer left the player and more
+// softly when it rests on it.
 - (void)hideControls {
   if (!mControlsVisible) {
     return;
@@ -1652,9 +2092,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   __weak ZenPipPlayerChrome* weakSelf = self;
   [NSAnimationContext
       runAnimationGroup:^(NSAnimationContext* ctx) {
-        ctx.duration = 0.32;
-        ctx.timingFunction =
-            [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+        ctx.duration = mPointerInside ? kIdleHideDuration : kHideDuration;
+        ctx.timingFunction = EaseIn();
         mControlsRoot.animator.alphaValue = 0;
         mScrim.animator.alphaValue = 0;
       }
@@ -1673,45 +2112,53 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)noteActivity {
-  mLastActivity = CACurrentMediaTime();
   [self showControls];
+  [self hideAfter:mConfig.idleHideDelay];
+}
+
+// The controls hide `aDelay` from now, unless something keeps them up then
+// (see -shouldKeepControlsVisible).
+- (void)hideAfter:(NSTimeInterval)aDelay {
+  mHideAt = CACurrentMediaTime() + aDelay;
+  if (mHideTimer && mHideTimer.fireDate.timeIntervalSinceNow > aDelay + 0.05) {
+    [mHideTimer invalidate];
+    mHideTimer = nil;
+  }
   [self scheduleHide];
 }
 
+// One timer at a time; it re-checks the deadline when it fires.
 - (void)scheduleHide {
   if (mHideTimer || mInvalidated) {
     return;
   }
   __weak ZenPipPlayerChrome* weakSelf = self;
-  NSTimeInterval delay =
-      std::max<NSTimeInterval>(0.05, mLastActivity + mConfig.idleHideDelay - CACurrentMediaTime());
-  mHideTimer = [NSTimer timerWithTimeInterval:delay
-                                      repeats:NO
-                                        block:^(NSTimer*) {
-                                          [weakSelf hideTimerFired];
-                                        }];
-  mHideTimer.tolerance = 0.15;
+  mHideTimer =
+      [NSTimer timerWithTimeInterval:std::max<NSTimeInterval>(
+                                         0.05, mHideAt - CACurrentMediaTime())
+                             repeats:NO
+                               block:^(NSTimer*) {
+                                 [weakSelf hideTimerFired];
+                               }];
+  mHideTimer.tolerance = 0.1;
   [NSRunLoop.mainRunLoop addTimer:mHideTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)hideTimerFired {
   mHideTimer = nil;
-  if ([self shouldKeepControlsVisible]) {
-    return;  // re-armed when the reason ends (activity, play, scrub end...)
-  }
-  if (CACurrentMediaTime() - mLastActivity < mConfig.idleHideDelay - 0.05) {
+  if (CACurrentMediaTime() < mHideAt - 0.05) {
     [self scheduleHide];
     return;
+  }
+  if ([self shouldKeepControlsVisible]) {
+    return;  // re-armed when the reason ends (activity, play, scrub end...)
   }
   [self hideControls];
 }
 
 - (void)revealControlsFor:(NSTimeInterval)aDuration {
   [self showControls];
-  mLastActivity = CACurrentMediaTime() + aDuration - mConfig.idleHideDelay;
-  [mHideTimer invalidate];
-  mHideTimer = nil;
-  [self scheduleHide];
+  [self hideAfter:aDuration];
 }
 
 - (void)revealControlsSticky:(BOOL)aSticky {
@@ -1724,12 +2171,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)focusControls {
-  NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (mStashed) {
     return;
   }
   [self showControls];
-  [window makeFirstResponder:mPlay.button];
+  [mWindow makeFirstResponder:mPlay.button];
 }
 
 #pragma mark Actions
@@ -1775,18 +2221,19 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // with the current one checked (also when the site chose a speed of its own).
 - (NSMenu*)speedMenu {
   NSMenu* menu = [[NSMenu alloc] init];
-  menu.delegate = (id<NSMenuDelegate>)self;
+  menu.delegate = self;
   NSString* title = [self string:@"speed" fallback:@"Playback speed"];
-  NSMenuItem* header = nil;
   if (@available(macOS 14.0, *)) {
-    header = [NSMenuItem sectionHeaderWithTitle:title];
+    [menu addItem:[NSMenuItem sectionHeaderWithTitle:title]];
   } else {
-    header = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
-    header.enabled = NO;
+    [menu addItem:[[NSMenuItem alloc] initWithTitle:title
+                                             action:nil
+                                      keyEquivalent:@""]];
   }
-  [menu addItem:header];
-  std::vector<double> rates(std::begin(kSpeedMenuRates), std::end(kSpeedMenuRates));
-  if (std::none_of(rates.begin(), rates.end(), [&](double r) { return SameRate(r, mRate); })) {
+  std::vector<double> rates(std::begin(kSpeedMenuRates),
+                            std::end(kSpeedMenuRates));
+  if (std::none_of(rates.begin(), rates.end(),
+                   [&](double r) { return SameRate(r, mRate); })) {
     rates.push_back(mRate);
     std::sort(rates.begin(), rates.end());
   }
@@ -1796,23 +2243,32 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                                            keyEquivalent:@""];
     item.target = self;
     item.representedObject = @(rate);
-    item.state = SameRate(rate, mRate) ? NSControlStateValueOn : NSControlStateValueOff;
+    item.state =
+        SameRate(rate, mRate) ? NSControlStateValueOn : NSControlStateValueOff;
     [menu addItem:item];
   }
   return menu;
 }
 
 - (void)onSpeed:(id)aSender {
+  // The menu tracks in a nested event loop, while Gecko keeps running: the
+  // player can close and drop its chrome before it returns.
+  ZenPipPlayerChrome* keepAlive = self;
   NSButton* button = mSpeed.button;
   // Drops down from the button's bottom-left corner (NSButton is flipped).
-  [[self speedMenu] popUpMenuPositioningItem:nil
-                                  atLocation:NSMakePoint(0, NSHeight(button.bounds) + 4)
-                                      inView:button];
-  [self noteActivity];
+  [[self speedMenu]
+      popUpMenuPositioningItem:nil
+                    atLocation:NSMakePoint(0, NSHeight(button.bounds) + 4)
+                        inView:button];
+  if (!keepAlive->mInvalidated) {
+    [keepAlive noteActivity];
+  }
 }
 
 - (void)onRateItem:(NSMenuItem*)aItem {
-  [self notifyHost:"set-rate" value:[aItem.representedObject doubleValue] detail:nil];
+  [self notifyHost:"set-rate"
+             value:[aItem.representedObject doubleValue]
+            detail:nil];
 }
 
 - (void)menuNeedsUpdate:(NSMenu*)aMenu {
@@ -1821,20 +2277,18 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   }
   [aMenu removeAllItems];
   NSMenuItem* toggle = [[NSMenuItem alloc]
-      initWithTitle:[self string:@"captionsMenuShow" fallback:@"Show Captions"]
+      initWithTitle:[self string:@"subtitlesMenu" fallback:@"Subtitles"]
              action:@selector(onCaptions:)
       keyEquivalent:@""];
   toggle.target = self;
-  toggle.state = mCaptionsEnabled ? NSControlStateValueOn : NSControlStateValueOff;
-  toggle.enabled = mCaptionsAvailable;
+  toggle.state =
+      mCaptionsEnabled ? NSControlStateValueOn : NSControlStateValueOff;
   [aMenu addItem:toggle];
   [aMenu addItem:[NSMenuItem separatorItem]];
-  NSMenuItem* header = [[NSMenuItem alloc]
-      initWithTitle:[self string:@"captionsSize" fallback:@"Font size"]
-             action:nil
-      keyEquivalent:@""];
-  header.enabled = NO;
-  [aMenu addItem:header];
+  [aMenu addItem:[[NSMenuItem alloc] initWithTitle:[self string:@"captionsSize"
+                                                       fallback:@"Font size"]
+                                            action:nil
+                                     keyEquivalent:@""]];
   for (NSString* size in @[ @"small", @"medium", @"large" ]) {
     NSString* key = [@"captionSize-" stringByAppendingString:size];
     NSMenuItem* item = [[NSMenuItem alloc]
@@ -1851,7 +2305,13 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)aItem {
-  return aItem.action != @selector(onCaptions:) || mCaptionsAvailable;
+  if (aItem.action == @selector(onCaptions:)) {
+    return mCaptionsAvailable;
+  }
+  if (aItem.action == @selector(onRateItem:)) {
+    return ![self isRateBlocked:[aItem.representedObject doubleValue]];
+  }
+  return YES;
 }
 
 - (void)onCaptionSizeItem:(NSMenuItem*)aItem {
@@ -1872,13 +2332,16 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 - (void)onScrub:(NSSlider*)aSlider {
   NSEventType type = NSApp.currentEvent.type;
   double position = std::clamp(aSlider.doubleValue, 0.0, 1.0);
-  BOOL tracking = type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseDragged;
+  BOOL tracking =
+      type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseDragged;
   if (tracking && !mScrubbing) {
     mScrubbing = YES;
     [self notifyHost:"scrub-start" value:position detail:nil];
   }
   if (mScrubbing) {
-    [self notifyHost:tracking ? "scrub" : "scrub-end" value:position detail:nil];
+    [self notifyHost:tracking ? "scrub" : "scrub-end"
+               value:position
+              detail:nil];
     if (!tracking) {
       mScrubbing = NO;
     }
@@ -1896,20 +2359,31 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 #pragma mark Keyboard
 
-- (BOOL)overlayKeyDown:(NSEvent*)aEvent {
+- (void)overlayKeyDown:(NSEvent*)aEvent {
   NSEventModifierFlags mods = aEvent.modifierFlags;
   unsigned short code = aEvent.keyCode;
-  if (code == 48 /* Tab */) {
+  if (code == kKeyTab) {
     // Unhandled Tabs from a focused control bubble up to us: move along the
-    // key-view loop instead of jumping back to the first control.
+    // reading order instead of jumping back to the first control.
     [self moveKeyboardFocusBackwards:(mods & NSEventModifierFlagShift) != 0];
     [self noteActivity];
-    return YES;
+    return;
   }
-  if (code == 53 /* Escape */ && [self keyboardFocusInControls]) {
+  if (code == kKeyEscape && [self keyboardFocusInControls]) {
     [mWindow makeFirstResponder:mOverlay];
     [self noteActivity];
-    return YES;
+    return;
+  }
+  BOOL command = (mods & NSEventModifierFlagCommand) != 0;
+  if (command && code == kKeyM) {
+    [self minimize];  // like Command-M on any window
+    return;
+  }
+  // The application menu takes the Command shortcuts the player has no use
+  // for (⌘Q, ⌘H, ⌘,), as in any other Zen window.
+  if (command && !IsPlayerCommandKey(aEvent) && mHost &&
+      mHost->PerformMenuKeyEquivalent(aEvent)) {
+    return;
   }
   NSString* key = aEvent.charactersIgnoringModifiers ?: @"";
   NSDictionary* detail = @{
@@ -1921,7 +2395,6 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   };
   [self notifyHost:"key" value:code detail:JSONString(detail)];
   [self noteActivity];
-  return YES;
 }
 
 #pragma mark Geometry helpers
@@ -1931,19 +2404,16 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (source.screen) {
     return source.screen;
   }
-  if (source) {
-    // Off-screen or minimized: pick the display nearest to its frame.
+  NSArray<NSScreen*>* screens = NSScreen.screens;
+  if (source && screens.count) {
+    // Off-screen or minimized: the display nearest to its frame.
     std::vector<Box> frames;
-    NSArray<NSScreen*>* screens = NSScreen.screens;
     for (NSScreen* screen in screens) {
       frames.push_back(ToRect(screen.frame));
     }
-    if (!frames.empty()) {
-      return screens[ScreenIndexForRect(ToRect(source.frame), frames)];
-    }
+    return screens[ScreenIndexForRect(ToRect(source.frame), frames)];
   }
-  NSWindow* window = mWindow;
-  return window.screen ?: NSScreen.mainScreen;
+  return mWindow.screen ?: NSScreen.mainScreen;
 }
 
 // The display the player lives on: the one the user dragged it onto, as long
@@ -1960,11 +2430,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (BOOL)homeIsPinned {
-  if (!mHomeDisplay) {
-    return NO;
-  }
   NSScreen* home = [self homeScreen];
-  return home && DisplayID(home) == mHomeDisplay;
+  return mHomeDisplay && home && DisplayID(home) == mHomeDisplay;
 }
 
 - (Box)visibleFrame {
@@ -1976,46 +2443,99 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   return AllowedArea([self visibleFrame], mConfig.edgeGap);
 }
 
-- (void)setWindowOrigin:(Vec2)aOrigin {
-  NSWindow* window = mWindow;
-  [window setFrameOrigin:NSMakePoint(aOrigin.x, aOrigin.y)];
+// Whether another display continues past the left or right edge of the
+// player's display beside `aFrame` (the player would cross onto it).
+- (BOOL)hasDisplayBeyond:(HEdge)aSide of:(const Box&)aFrame {
+  NSScreen* home = [self homeScreen];
+  NSRect h = home.frame;
+  for (NSScreen* screen in NSScreen.screens) {
+    NSRect f = screen.frame;
+    if (DisplayID(screen) == DisplayID(home) || NSMaxY(f) <= aFrame.MinY() ||
+        NSMinY(f) >= aFrame.MaxY()) {
+      continue;
+    }
+    if (aSide == HEdge::Left ? std::abs(NSMaxX(f) - NSMinX(h)) < 2
+                             : std::abs(NSMinX(f) - NSMaxX(h)) < 2) {
+      return YES;
+    }
+  }
+  return NO;
 }
 
-// Re-establishes containment: same anchor, on the source window's display.
+// The frames of the other players that are on screen.
+- (std::vector<Box>)otherPlayerFrames {
+  std::vector<Box> frames;
+  for (ZenPipPlayerChrome* other in AllPlayers()) {
+    NSWindow* window = other->mWindow;
+    if (other != self && window.isVisible && !other->mStashed) {
+      frames.push_back(ToRect(window.frame));
+    }
+  }
+  return frames;
+}
+
+// A new player opened over another one moves to a free corner.
+- (void)moveClearOfOtherPlayers {
+  Box frame = ToRect(mWindow.frame);
+  std::vector<Box> others = [self otherPlayerFrames];
+  if (std::none_of(others.begin(), others.end(), [&](const Box& aOther) {
+        return aOther.IntersectionArea(frame) > 0;
+      })) {
+    return;
+  }
+  Corner corner = NearestFreeCorner(frame.Center(), frame.Size(),
+                                    [self allowedArea], others);
+  mRestDock = corner.dock;
+  [self setWindowOrigin:corner.origin];
+}
+
+- (void)setWindowOrigin:(Vec2)aOrigin {
+  mSettingFrame = YES;
+  [mWindow setFrameOrigin:NSMakePoint(aOrigin.x, aOrigin.y)];
+  mSettingFrame = NO;
+}
+
+- (void)setPlayerFrame:(NSRect)aFrame {
+  mSettingFrame = YES;
+  [mWindow setFrame:aFrame display:YES];
+  mSettingFrame = NO;
+}
+
+// Re-establishes containment on the player's display: the same size limits
+// and, after the usable area changed (Dock or menu bar shown, hidden or
+// moved, a display rearranged), the same edges it rests against.
 - (void)settleAnimated:(BOOL)aAnimated {
   NSWindow* window = mWindow;
-  if (!window || mTucked || mGesture != ZenPipGestureNone || window.inLiveResize) {
+  if (!window || mStashed || mExiting || mGesture != ZenPipGestureNone ||
+      mFrameAnimations > 0) {
     return;
   }
   Box area = [self allowedArea];
   Box frame = ToRect(window.frame);
-  Vec2 size = ClampSize(frame.width, mAspect, area, mConfig.limits);
-  if (std::abs(size.x - frame.width) > 0.5 || std::abs(size.y - frame.height) > 0.5) {
-    Box resized = ScaleFrame(frame, size.x / frame.width, mAspect,
-                              DetectDock(frame, area, 2), area, mConfig.limits);
-    [window setFrame:ToNSRect(resized) display:YES];
-    frame = resized;
-  }
-  // If the player is on another display, carry its placement over.
-  Placement placement = PlacementForFrame(frame, area, 2);
-  if (!Box(area).Contains(frame, 0.5) && area.IntersectionArea(frame) <= 0) {
-    std::vector<Box> areas;
-    for (NSScreen* screen in NSScreen.screens) {
-      areas.push_back(AllowedArea(ToRect(screen.visibleFrame), mConfig.edgeGap));
-    }
-    if (!areas.empty()) {
-      placement = PlacementForFrame(frame, areas[ScreenIndexForRect(frame, areas)], 2);
-    }
-  }
-  Vec2 target = area.Contains(frame, 0.5) ? frame.Origin()
-                                          : OriginForPlacement(placement, frame.Size(), area);
-  if (area.Contains(frame, 0.5)) {
-    [self reportPlacement];
+  if (area.IntersectionArea(frame) <= 0) {
+    // On another display (e.g. the one it was on disconnected): carry its
+    // placement over.
+    std::vector<Box> areas = ScreenAreas(mConfig.edgeGap);
+    Box from = areas.empty() ? frame : areas[ScreenIndexForRect(frame, areas)];
+    [self hopWithPlacement:PlacementForFrame(frame, from, kDockTolerance)
+                  animated:aAnimated];
     return;
   }
-  if (aAnimated && area.IntersectionArea(frame) <= 0) {
-    // Arriving from another display (e.g. the one it was on disconnected).
-    [self hopToFrame:NSMakeRect(target.x, target.y, frame.width, frame.height)];
+  Vec2 size = ClampSize(frame.width, mAspect, area, mConfig.limits);
+  if (std::abs(size.x - frame.width) > 0.5 ||
+      std::abs(size.y - frame.height) > 0.5) {
+    [self stopAnimation];
+    frame = ScaleFrame(frame, size.x / frame.width, mAspect, mRestDock, area,
+                       mConfig.limits);
+    [self setPlayerFrame:ToNSRect(frame)];
+  }
+  Vec2 target =
+      OriginForDock(mRestDock, ClampOrigin(frame.Origin(), frame.Size(), area),
+                    frame.Size(), area);
+  if ((target - frame.Origin()).Length() < 0.5) {
+    if (![self isAnimating]) {
+      [self reportPlacement];
+    }
     return;
   }
   [self animateTo:target velocity:{} animated:aAnimated];
@@ -2023,7 +2543,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (void)sourceScreenChanged {
   NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (!window || mStashed || mExiting) {
     return;
   }
   if ([self homeIsPinned]) {
@@ -2032,57 +2552,79 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   Box frame = ToRect(window.frame);
-  std::vector<Box> areas;
-  for (NSScreen* screen in NSScreen.screens) {
-    areas.push_back(AllowedArea(ToRect(screen.visibleFrame), mConfig.edgeGap));
-  }
+  std::vector<Box> areas = ScreenAreas(mConfig.edgeGap);
   Box from = areas.empty() ? frame : areas[ScreenIndexForRect(frame, areas)];
-  Placement placement = PlacementForFrame(frame, from, 2);
+  [self hopWithPlacement:PlacementForFrame(frame, from, kDockTolerance)
+                animated:YES];
+}
+
+// Moves the player onto its home display with the same placement.
+- (void)hopWithPlacement:(const Placement&)aPlacement animated:(BOOL)aAnimated {
   Box area = [self allowedArea];
-  Vec2 size = ClampSize(frame.width, mAspect, area, mConfig.limits);
-  Vec2 target = OriginForPlacement(placement, size, area);
-  [self hopToFrame:NSMakeRect(target.x, target.y, size.x, size.y)];
+  Vec2 size =
+      ClampSize(mWindow.frame.size.width, mAspect, area, mConfig.limits);
+  Vec2 target = OriginForPlacement(aPlacement, size, area);
+  mRestDock = aPlacement.dock;
+  NSRect destination = NSMakeRect(target.x, target.y, size.x, size.y);
+  if (aAnimated) {
+    [self hopToFrame:destination];
+  } else {
+    [self setPlayerFrame:destination];
+    [self reportPlacement];
+  }
 }
 
 // Crossing displays: fade out, move, fade back in (no flight across, so the
 // player is never split between two displays).
 - (void)hopToFrame:(NSRect)aDestination {
   NSWindow* window = mWindow;
-  if (!window) {
-    return;
-  }
   [self stopAnimation];
-  NSRect destination = aDestination;
   if (mAppearance.reduceMotion) {
-    [window setFrame:destination display:YES];
+    [self setPlayerFrame:aDestination];
     [self reportPlacement];
     return;
   }
   __weak ZenPipPlayerChrome* weakSelf = self;
+  mFrameAnimations++;
   [NSAnimationContext
       runAnimationGroup:^(NSAnimationContext* ctx) {
         ctx.duration = 0.12;
+        ctx.timingFunction = EaseIn();
         window.animator.alphaValue = 0;
       }
       completionHandler:^{
-        [window setFrame:destination display:YES];
-        [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
-          ctx.duration = 0.2;
-          window.animator.alphaValue = 1;
-        }];
-        [weakSelf reportPlacement];
+        ZenPipPlayerChrome* chrome = weakSelf;
+        if (!chrome) {
+          return;
+        }
+        [chrome setPlayerFrame:aDestination];
+        [chrome fadeInAfterHop];
+        chrome->mFrameAnimations--;
+        [chrome reportPlacement];
       }];
+}
+
+- (void)fadeInAfterHop {
+  NSWindow* window = mWindow;
+  if (mAppearance.reduceMotion || mExiting) {
+    window.alphaValue = 1;
+    return;
+  }
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = 0.18;
+    ctx.timingFunction = EaseOut();
+    window.animator.alphaValue = 1;
+  }];
 }
 
 - (void)reportPlacement {
   NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (!window || mStashed || mExiting) {
     return;
   }
-  Box area = [self allowedArea];
   Box frame = ToRect(window.frame);
-  Placement p = PlacementForFrame(frame, area, 2);
-  mLastDock = p.dock;
+  Placement p = PlacementForFrame(frame, [self allowedArea], kDockTolerance);
+  mRestDock = p.dock;
   [self notifyHost:"placement"
              value:0
             detail:JSONString(@{
@@ -2092,18 +2634,28 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
               @"width" : @(frame.width),
               @"height" : @(frame.height)
             })];
+  [self applyVideoAspect];
 }
 
 #pragma mark Animation
 
-- (void)animateTo:(Vec2)aTarget velocity:(Vec2)aVelocity animated:(BOOL)aAnimated {
-  NSWindow* window = mWindow;
-  if (!window) {
-    return;
+- (BOOL)isAnimating {
+  if (@available(macOS 14.0, *)) {
+    if (mDisplayLink) {
+      return YES;
+    }
   }
+  return mFallbackAnimationTimer || mFrameAnimations > 0;
+}
+
+- (void)animateTo:(Vec2)aTarget
+         velocity:(Vec2)aVelocity
+         animated:(BOOL)aAnimated {
+  NSWindow* window = mWindow;
   [self stopAnimation];
   Vec2 from = ToRect(window.frame).Origin();
-  if (!aAnimated || mAppearance.reduceMotion || (from - aTarget).Length() < 0.5) {
+  if (!aAnimated || mAppearance.reduceMotion ||
+      (from - aTarget).Length() < 0.5) {
     [self setWindowOrigin:aTarget];
     [self reportPlacement];
     return;
@@ -2114,51 +2666,55 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   auto bound = [&](double aV, double aDistance) {
     double limit = omega * std::abs(aDistance) * 1.15 + 120;
     bool toward = aV * aDistance > 0;
-    return toward ? std::clamp(aV, -limit, limit) : std::clamp(aV, -2500.0, 2500.0);
+    return toward ? std::clamp(aV, -limit, limit)
+                  : std::clamp(aV, -2500.0, 2500.0);
   };
   Vec2 toTarget = aTarget - from;
-  Vec2 velocity{bound(aVelocity.x, toTarget.x), bound(aVelocity.y, toTarget.y)};
-  mSpring.Start(from, velocity, aTarget, mConfig.spring);
+  mSpring.Start(
+      from, {bound(aVelocity.x, toTarget.x), bound(aVelocity.y, toTarget.y)},
+      aTarget, mConfig.spring);
   mSpringStart = CACurrentMediaTime();
-  mAnimating = YES;
   if (@available(macOS 14.0, *)) {
-    mDisplayLink = [mOverlay displayLinkWithTarget:self selector:@selector(animationStep:)];
-    [mDisplayLink addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    mDisplayLink = [mOverlay displayLinkWithTarget:self
+                                          selector:@selector(animationStep:)];
+    [mDisplayLink addToRunLoop:NSRunLoop.mainRunLoop
+                       forMode:NSRunLoopCommonModes];
   } else {
     __weak ZenPipPlayerChrome* weakSelf = self;
-    mFallbackAnimationTimer = [NSTimer timerWithTimeInterval:1.0 / 60
-                                                     repeats:YES
-                                                       block:^(NSTimer*) {
-                                                         [weakSelf animationStep:nil];
-                                                       }];
-    [NSRunLoop.mainRunLoop addTimer:mFallbackAnimationTimer forMode:NSRunLoopCommonModes];
+    mFallbackAnimationTimer =
+        [NSTimer timerWithTimeInterval:1.0 / 60
+                               repeats:YES
+                                 block:^(NSTimer*) {
+                                   [weakSelf animationStep:nil];
+                                 }];
+    [NSRunLoop.mainRunLoop addTimer:mFallbackAnimationTimer
+                            forMode:NSRunLoopCommonModes];
   }
 }
 
 - (void)animationStep:(id)aLink {
   NSWindow* window = mWindow;
-  if (!window || !mAnimating) {
+  if (!window) {
     [self stopAnimation];
     return;
   }
   double t = CACurrentMediaTime() - mSpringStart;
-  Vec2 position, velocity;
-  mSpring.Sample(t, &position, &velocity);
-  // Even mid-flight the frame never leaves the display's usable area.
-  Box hard = [self visibleFrame];
   Vec2 size = ToRect(window.frame).Size();
-  position = ClampOrigin(position, size, hard);
   if (mSpring.IsSettled(t) || t > 3) {
-    [self setWindowOrigin:mSpring.Target()];
+    // The area may have changed during the flight.
     [self stopAnimation];
+    [self setWindowOrigin:ClampOrigin(mSpring.Target(), size,
+                                      [self allowedArea])];
     [self reportPlacement];
     return;
   }
-  [self setWindowOrigin:position];
+  Vec2 position, velocity;
+  mSpring.Sample(t, &position, &velocity);
+  // Even mid-flight the frame never leaves the display's usable area.
+  [self setWindowOrigin:ClampOrigin(position, size, [self visibleFrame])];
 }
 
 - (void)stopAnimation {
-  mAnimating = NO;
   if (@available(macOS 14.0, *)) {
     [mDisplayLink invalidate];
     mDisplayLink = nil;
@@ -2167,13 +2723,34 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mFallbackAnimationTimer = nil;
 }
 
-- (Vec2)currentAnimationVelocity {
-  if (!mAnimating) {
-    return {};
-  }
-  Vec2 position, velocity;
-  mSpring.Sample(CACurrentMediaTime() - mSpringStart, &position, &velocity);
-  return velocity;
+// Animates the window's frame, and its alpha unless `aAlpha` is negative.
+- (void)animateFrame:(NSRect)aFrame
+               alpha:(CGFloat)aAlpha
+            duration:(NSTimeInterval)aDuration
+               curve:(CAMediaTimingFunction*)aCurve
+          completion:(void (^_Nullable)(ZenPipPlayerChrome* aChrome))aDone {
+  NSWindow* window = mWindow;
+  __weak ZenPipPlayerChrome* weakSelf = self;
+  mFrameAnimations++;
+  [NSAnimationContext
+      runAnimationGroup:^(NSAnimationContext* ctx) {
+        ctx.duration = aDuration;
+        ctx.timingFunction = aCurve;
+        [window.animator setFrame:aFrame display:YES];
+        if (aAlpha >= 0) {
+          window.animator.alphaValue = aAlpha;
+        }
+      }
+      completionHandler:^{
+        ZenPipPlayerChrome* chrome = weakSelf;
+        if (!chrome) {
+          return;
+        }
+        chrome->mFrameAnimations--;
+        if (aDone) {
+          aDone(chrome);
+        }
+      }];
 }
 
 #pragma mark Pointer gestures
@@ -2181,27 +2758,44 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // The resize handle at a point in overlay coordinates: the resize border (see
 // kResizeBand), including just outside the window, except where a control is
 // drawn on it.
-- (nullable NSNumber*)resizeHandleAt:(NSPoint)aPoint {
+- (std::optional<ResizeHandle>)resizeHandleAt:(NSPoint)aPoint {
   NSSize size = mOverlay.bounds.size;
   if (size.width < 120 || size.height < 80) {
-    return nil;
+    return std::nullopt;
   }
-  BOOL left = aPoint.x < kResizeBand, right = aPoint.x > size.width - kResizeBand;
-  BOOL bottom = aPoint.y < kResizeBand, top = aPoint.y > size.height - kResizeBand;
-  BOOL cLeft = aPoint.x < kResizeCornerBand, cRight = aPoint.x > size.width - kResizeCornerBand;
-  BOOL cBottom = aPoint.y < kResizeCornerBand, cTop = aPoint.y > size.height - kResizeCornerBand;
+  BOOL left = aPoint.x<kResizeBand, right = aPoint.x> size.width - kResizeBand;
+  BOOL bottom = aPoint.y<kResizeBand, top = aPoint.y> size.height - kResizeBand;
+  BOOL cLeft = aPoint.x<kResizeCornerBand, cRight = aPoint.x> size.width -
+               kResizeCornerBand;
+  BOOL cBottom = aPoint.y<kResizeCornerBand, cTop = aPoint.y> size.height -
+                 kResizeCornerBand;
   BOOL corner = (cLeft || cRight) && (cBottom || cTop);
-  if (!(left || right || bottom || top || corner) || [self controlDrawnAt:aPoint]) {
-    return nil;
+  if (!(left || right || bottom || top || corner) ||
+      [self controlDrawnAt:aPoint]) {
+    return std::nullopt;
   }
-  if (cLeft && cBottom) return @((int)ResizeHandle::BottomLeft);
-  if (cRight && cBottom) return @((int)ResizeHandle::BottomRight);
-  if (cLeft && cTop) return @((int)ResizeHandle::TopLeft);
-  if (cRight && cTop) return @((int)ResizeHandle::TopRight);
-  if (left) return @((int)ResizeHandle::Left);
-  if (right) return @((int)ResizeHandle::Right);
-  if (bottom) return @((int)ResizeHandle::Bottom);
-  return @((int)ResizeHandle::Top);
+  if (cLeft && cBottom) return ResizeHandle::BottomLeft;
+  if (cRight && cBottom) return ResizeHandle::BottomRight;
+  if (cLeft && cTop) return ResizeHandle::TopLeft;
+  if (cRight && cTop) return ResizeHandle::TopRight;
+  if (left) return ResizeHandle::Left;
+  if (right) return ResizeHandle::Right;
+  if (bottom) return ResizeHandle::Bottom;
+  return ResizeHandle::Top;
+}
+
+// The button or slider under a point in overlay coordinates, if any.
+- (nullable NSView*)controlAt:(NSPoint)aPoint {
+  NSView* parent = mOverlay.superview;
+  NSView* control = parent ? [mOverlay hitTest:[mOverlay convertPoint:aPoint
+                                                               toView:parent]]
+                           : nil;
+  while (control && control != mOverlay &&
+         ![control isKindOfClass:[NSButton class]] &&
+         ![control isKindOfClass:[NSSlider class]]) {
+    control = control.superview;
+  }
+  return control == mOverlay ? nil : control;
 }
 
 // Whether a control is drawn at a point in overlay coordinates: inside a
@@ -2209,65 +2803,60 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 // rectangle around it. Small players bring the controls within the resize
 // border; their empty corners still resize.
 - (BOOL)controlDrawnAt:(NSPoint)aPoint {
-  NSView* parent = mOverlay.superview;
-  if (!parent) {
-    return NO;
-  }
-  NSView* control = [mOverlay hitTest:[mOverlay convertPoint:aPoint toView:parent]];
-  while (control && control != mOverlay && ![control isKindOfClass:[NSButton class]] &&
-         ![control isKindOfClass:[NSSlider class]]) {
-    control = control.superview;
-  }
-  if (!control || control == mOverlay) {
+  NSView* control = [self controlAt:aPoint];
+  if (!control) {
     return NO;
   }
   NSRect r = [mOverlay convertRect:control.bounds fromView:control];
   CGFloat radius = std::min(r.size.width, r.size.height) / 2;
-  return [[NSBezierPath bezierPathWithRoundedRect:r xRadius:radius yRadius:radius]
-      containsPoint:aPoint];
+  return [[NSBezierPath bezierPathWithRoundedRect:r
+                                          xRadius:radius
+                                          yRadius:radius] containsPoint:aPoint];
 }
 
-// The local event monitor's filter (see init). A press on the resize border
-// starts the chrome's own resize, the same however many clicks came before
-// it, and its drags and its release go there too; AppKit sees none of them.
-// Presses elsewhere, and on controls drawn on the border, pass through.
-- (nullable NSEvent*)filterBorderPress:(NSEvent*)aEvent {
+// The local event monitor's filter (see init). The chrome handles every left
+// press in the player outside its controls itself, with its drags and its
+// release, so AppKit sees none of them: AppKit makes the window key on every
+// press (a drag from another app would take the keyboard), and resizes from
+// its own border areas with its own anchoring, growing the window toward the
+// screen corner when two presses land on a corner within the double-click
+// interval. Presses on the buttons and the slider pass through.
+- (nullable NSEvent*)filterPress:(NSEvent*)aEvent {
   if (aEvent.type != NSEventTypeLeftMouseDown) {
-    if (!mOwnsBorderPress) {
+    if (!mOwnsPress) {
       return aEvent;
     }
     NSPoint pointer = EventScreenLocation(aEvent);
     if (aEvent.type == NSEventTypeLeftMouseUp) {
-      mOwnsBorderPress = NO;
-      [self gestureEndedAt:pointer time:aEvent.timestamp clickCount:0];
+      mOwnsPress = NO;
+      [self gestureEndedAt:pointer
+                      time:aEvent.timestamp
+                clickCount:aEvent.clickCount
+                 modifiers:aEvent.modifierFlags];
     } else {
       [self gestureMovedTo:pointer time:aEvent.timestamp];
     }
     return nil;
   }
-  mOwnsBorderPress = NO;
+  mOwnsPress = NO;
   NSWindow* window = mWindow;
-  if (mInvalidated || !window || aEvent.window != window) {
+  if (mInvalidated || mExiting || !window || aEvent.window != window) {
     return aEvent;
   }
-  NSNumber* handle =
-      [self resizeHandleAt:[mOverlay convertPoint:aEvent.locationInWindow fromView:nil]];
-  if (!handle) {
+  NSPoint local = [mOverlay convertPoint:aEvent.locationInWindow fromView:nil];
+  std::optional<ResizeHandle> handle = [self resizeHandleAt:local];
+  if (!handle && [self controlAt:local]) {
     return aEvent;
   }
-  mOwnsBorderPress = YES;
-  // In the active app a press makes the player the key window, as the window
-  // itself would have; a Command-press resizes without that, as AppKit does.
-  // Resizing from another app leaves the key window alone.
-  if (NSApp.isActive && !window.isKeyWindow && window.canBecomeKeyWindow &&
-      !(aEvent.modifierFlags & NSEventModifierFlagCommand)) {
-    [window makeKeyWindow];
-  }
-  [window makeFirstResponder:mOverlay];
+  mOwnsPress = YES;
   [self beginGestureAt:EventScreenLocation(aEvent) time:aEvent.timestamp];
-  mGesture = ZenPipGestureResize;
-  mResizeHandle = (ResizeHandle)handle.intValue;
-  [[self cursorForHandle:mResizeHandle] set];
+  if (handle) {
+    mGesture = ZenPipGestureResize;
+    mResizeHandle = *handle;
+    [[self cursorForHandle:*handle] set];
+  } else {
+    mGesture = ZenPipGesturePending;
+  }
   [self noteActivity];
   return nil;
 }
@@ -2276,17 +2865,34 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (@available(macOS 15.0, *)) {
     NSCursorFrameResizePosition position;
     switch (aHandle) {
-      case ResizeHandle::Left: position = NSCursorFrameResizePositionLeft; break;
-      case ResizeHandle::Right: position = NSCursorFrameResizePositionRight; break;
-      case ResizeHandle::Bottom: position = NSCursorFrameResizePositionBottom; break;
-      case ResizeHandle::Top: position = NSCursorFrameResizePositionTop; break;
-      case ResizeHandle::BottomLeft: position = NSCursorFrameResizePositionBottomLeft; break;
-      case ResizeHandle::BottomRight: position = NSCursorFrameResizePositionBottomRight; break;
-      case ResizeHandle::TopLeft: position = NSCursorFrameResizePositionTopLeft; break;
-      case ResizeHandle::TopRight: position = NSCursorFrameResizePositionTopRight; break;
+      case ResizeHandle::Left:
+        position = NSCursorFrameResizePositionLeft;
+        break;
+      case ResizeHandle::Right:
+        position = NSCursorFrameResizePositionRight;
+        break;
+      case ResizeHandle::Bottom:
+        position = NSCursorFrameResizePositionBottom;
+        break;
+      case ResizeHandle::Top:
+        position = NSCursorFrameResizePositionTop;
+        break;
+      case ResizeHandle::BottomLeft:
+        position = NSCursorFrameResizePositionBottomLeft;
+        break;
+      case ResizeHandle::BottomRight:
+        position = NSCursorFrameResizePositionBottomRight;
+        break;
+      case ResizeHandle::TopLeft:
+        position = NSCursorFrameResizePositionTopLeft;
+        break;
+      case ResizeHandle::TopRight:
+        position = NSCursorFrameResizePositionTopRight;
+        break;
     }
-    return [NSCursor frameResizeCursorFromPosition:position
-                                      inDirections:NSCursorFrameResizeDirectionsAll];
+    return [NSCursor
+        frameResizeCursorFromPosition:position
+                         inDirections:NSCursorFrameResizeDirectionsAll];
   }
   switch (aHandle) {
     case ResizeHandle::Left:
@@ -2305,17 +2911,14 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     [[self cursorForHandle:mResizeHandle] set];
     return;
   }
-  NSPoint p = [mOverlay convertPoint:aEvent.locationInWindow fromView:nil];
-  NSNumber* handle = [self resizeHandleAt:p];
-  if (handle) {
-    [[self cursorForHandle:(ResizeHandle)handle.intValue] set];
-  } else {
-    [NSCursor.arrowCursor set];
-  }
+  std::optional<ResizeHandle> handle =
+      [self resizeHandleAt:[mOverlay convertPoint:aEvent.locationInWindow
+                                         fromView:nil]];
+  [(handle ? [self cursorForHandle:*handle] : NSCursor.arrowCursor) set];
 }
 
-- (void)overlayMouseMoved:(NSEvent*)aEvent inside:(BOOL)aInside {
-  mPointerInside = aInside;
+- (void)overlayMouseMoved:(NSEvent*)aEvent {
+  mPointerInside = YES;
   if (mGesture == ZenPipGestureNone) {
     [self overlayUpdateCursor:aEvent];
   }
@@ -2326,86 +2929,98 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   mPointerInside = NO;
   if (mGesture == ZenPipGestureNone) {
     [NSCursor.arrowCursor set];
-    mLastActivity = CACurrentMediaTime() - mConfig.idleHideDelay + 0.6;
-    [mHideTimer invalidate];
-    mHideTimer = nil;
-    [self scheduleHide];
+    [self hideAfter:kPointerLeftGrace];
   }
 }
 
+// New input catches the player wherever it currently is.
 - (void)beginGestureAt:(NSPoint)aScreenPoint time:(NSTimeInterval)aTime {
   NSWindow* window = mWindow;
-  // New input catches the player wherever it currently is.
+  mCaughtMoving = [self isAnimating] && mFrameAnimations == 0;
   [self stopAnimation];
   [self cancelEdgeHold];
+  mGestureMoved = NO;
+  mPushingEdge = NO;
+  mStashArmed = HEdge::None;
   mGestureStartMouse = aScreenPoint;
   mGestureStartFrame = window.frame;
-  mGestureDock = DetectDock(ToRect(window.frame), [self allowedArea], 2);
+  mGestureDock =
+      DetectDock(ToRect(window.frame), [self allowedArea], kDockTolerance);
   mSamples.clear();
   mSamples.push_back({aTime, {aScreenPoint.x, aScreenPoint.y}});
 }
 
-- (void)overlayMouseDown:(NSEvent*)aEvent {
-  NSWindow* window = mWindow;
-  if (!window) {
-    return;
-  }
-  [window makeFirstResponder:mOverlay];
-  [self beginGestureAt:NSEvent.mouseLocation time:aEvent.timestamp];
-  NSPoint local = [mOverlay convertPoint:aEvent.locationInWindow fromView:nil];
-  NSNumber* handle = [self resizeHandleAt:local];
-  if (handle) {
-    mGesture = ZenPipGestureResize;
-    mResizeHandle = (ResizeHandle)handle.intValue;
-  } else {
-    mGesture = ZenPipGesturePending;
-  }
-  [self noteActivity];
-}
-
-- (void)overlayMouseDragged:(NSEvent*)aEvent {
-  [self gestureMovedTo:NSEvent.mouseLocation time:aEvent.timestamp];
-}
-
 - (void)gestureMovedTo:(NSPoint)aScreenPoint time:(NSTimeInterval)aTime {
-  NSWindow* window = mWindow;
-  if (!window) {
-    return;
-  }
   NSPoint delta = NSMakePoint(aScreenPoint.x - mGestureStartMouse.x,
                               aScreenPoint.y - mGestureStartMouse.y);
   mSamples.push_back({aTime, {aScreenPoint.x, aScreenPoint.y}});
   if (mSamples.size() > 32) {
     mSamples.erase(mSamples.begin(), mSamples.begin() + 16);
   }
-  if (mGesture == ZenPipGesturePending &&
-      std::hypot(delta.x, delta.y) >= kDragThreshold) {
-    mGesture = ZenPipGestureDrag;
+  if (!mGestureMoved && std::hypot(delta.x, delta.y) >= kDragThreshold) {
+    mGestureMoved = YES;
+    if (mGesture == ZenPipGesturePending) {
+      mGesture = ZenPipGestureDrag;
+    }
   }
   if (mGesture == ZenPipGestureDrag || mGesture == ZenPipGestureCarry) {
     Vec2 size = ToRect(mGestureStartFrame).Size();
-    Vec2 desired{mGestureStartFrame.origin.x + delta.x, mGestureStartFrame.origin.y + delta.y};
+    Vec2 desired{mGestureStartFrame.origin.x + delta.x,
+                 mGestureStartFrame.origin.y + delta.y};
     // A two-finger carry has no pointer on screen; the player's center is.
-    NSPoint pointer = mGesture == ZenPipGestureCarry
-                          ? NSMakePoint(desired.x + size.x / 2, desired.y + size.y / 2)
-                          : aScreenPoint;
+    NSPoint pointer =
+        mGesture == ZenPipGestureCarry
+            ? NSMakePoint(desired.x + size.x / 2, desired.y + size.y / 2)
+            : aScreenPoint;
     mLastGesturePoint = aScreenPoint;
-    BOOL hopped = [self followDrag:desired size:size ontoDisplayAt:pointer time:aTime];
-    Vec2 origin = RubberBandOrigin(desired, size, [self allowedArea], [self visibleFrame]);
+    BOOL hopped = [self followDrag:desired
+                              size:size
+                     ontoDisplayAt:pointer
+                              time:aTime];
+    Box area = [self allowedArea];
+    [self notePush:desired - ClampOrigin(desired, size, area)
+              size:size
+                at:desired];
+    Vec2 origin = RubberBandOrigin(desired, size, area, [self visibleFrame]);
     [self setWindowOrigin:origin];
     if (hopped) {
       // Carry on from here so the player moves 1:1 with the pointer on its
       // new display instead of waiting at the edge.
       mGestureStartMouse = aScreenPoint;
       mGestureStartFrame.origin = NSMakePoint(origin.x, origin.y);
+      mStashArmed = HEdge::None;
       [self fadeInAfterHop];
     }
   } else if (mGesture == ZenPipGestureResize) {
     Box resized = ResizeFrame(ToRect(mGestureStartFrame), mResizeHandle,
-                               {delta.x, delta.y}, mAspect, mGestureDock,
-                               [self allowedArea], mConfig.limits);
-    [window setFrame:ToNSRect(resized) display:YES];
+                              {delta.x, delta.y}, mAspect, mGestureDock,
+                              [self allowedArea], mConfig.limits);
+    [self setPlayerFrame:ToNSRect(resized)];
   }
+}
+
+// A drag pushing past the edges of the display by `aPush`: a tick when it
+// reaches an edge and holds there, and another one once it is pushed far
+// enough sideways, into a side with no display beyond, to stash on release.
+- (void)notePush:(Vec2)aPush size:(Vec2)aSize at:(Vec2)aOrigin {
+  BOOL pushing = aPush.Length() > 0.5;
+  if (pushing && !mPushingEdge) {
+    PerformAlignmentFeedback();
+  }
+  mPushingEdge = pushing;
+  HEdge armed = HEdge::None;
+  // Sideways only: a push into a corner docks there.
+  if (std::abs(aPush.x) >= kStashPushFraction * aSize.x &&
+      std::abs(aPush.y) < kStashPushFraction * aSize.y / 2) {
+    HEdge side = aPush.x < 0 ? HEdge::Left : HEdge::Right;
+    if (![self hasDisplayBeyond:side of:Box::FromOriginSize(aOrigin, aSize)]) {
+      armed = side;
+    }
+  }
+  if (armed != HEdge::None && armed != mStashArmed) {
+    PerformAlignmentFeedback();
+  }
+  mStashArmed = armed;
 }
 
 // Dragging past the edge of the player's display onto another display moves
@@ -2421,83 +3036,76 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSScreen* target = nil;
   for (NSScreen* screen in NSScreen.screens) {
     if (DisplayID(screen) != DisplayID(home) &&
-        NSPointInRect(aPointer, NSInsetRect(screen.frame, kCrossDisplayPointerInset,
-                                            kCrossDisplayPointerInset))) {
+        NSPointInRect(aPointer,
+                      NSInsetRect(screen.frame, kCrossDisplayPointerInset,
+                                  kCrossDisplayPointerInset))) {
       target = screen;
       break;
     }
   }
   Vec2 push = aDesired - ClampOrigin(aDesired, aSize, [self allowedArea]);
   bool horizontal = std::abs(push.x) >= std::abs(push.y);
-  double needed = std::clamp(kCrossDisplayPushFraction * (horizontal ? aSize.x : aSize.y),
-                             kCrossDisplayPushMin, kCrossDisplayPushMax);
+  double needed =
+      std::clamp(kCrossDisplayPushFraction * (horizontal ? aSize.x : aSize.y),
+                 kCrossDisplayPushMin, kCrossDisplayPushMax);
   if (!target || std::max(std::abs(push.x), std::abs(push.y)) < needed) {
     [self cancelEdgeHold];
     return NO;
   }
-  if (mEdgeHoldStart <= 0) {
+  if (!mEdgeHoldTimer) {
     mEdgeHoldStart = aTime;
-    // If the pointer then rests, nothing else would re-check: look again
-    // once the hold is over.
+    // With the pointer at rest no further event would end the hold.
     __weak ZenPipPlayerChrome* weakSelf = self;
     mEdgeHoldTimer = [NSTimer
-        scheduledTimerWithTimeInterval:kCrossDisplayHold + 0.01
+        scheduledTimerWithTimeInterval:kCrossDisplayHold
                                repeats:NO
                                  block:^(NSTimer*) {
                                    ZenPipPlayerChrome* chrome = weakSelf;
-                                   if (chrome && chrome->mEdgeHoldStart > 0 &&
+                                   if (chrome &&
                                        (chrome->mGesture == ZenPipGestureDrag ||
-                                        chrome->mGesture == ZenPipGestureCarry)) {
-                                     chrome->mEdgeHoldTimer = nil;
-                                     [chrome gestureMovedTo:chrome->mLastGesturePoint
-                                                       time:std::max(
-                                                                NSProcessInfo.processInfo
-                                                                    .systemUptime,
-                                                                chrome->mEdgeHoldStart +
-                                                                    kCrossDisplayHold)];
+                                        chrome->mGesture ==
+                                            ZenPipGestureCarry)) {
+                                     chrome->mEdgeHoldElapsed = YES;
+                                     [chrome
+                                         gestureMovedTo:chrome
+                                                            ->mLastGesturePoint
+                                                   time:NSProcessInfo
+                                                            .processInfo
+                                                            .systemUptime];
                                    }
                                  }];
     return NO;
   }
-  // The timer re-checks at exactly mEdgeHoldStart + kCrossDisplayHold; at
-  // uptimes of days that sum loses enough precision to land a hair short.
-  if (aTime - mEdgeHoldStart < kCrossDisplayHold - 1e-6) {
+  if (!mEdgeHoldElapsed && aTime - mEdgeHoldStart < kCrossDisplayHold) {
     return NO;
   }
   [self cancelEdgeHold];
   // Back on the source window's display it follows that window again.
-  mHomeDisplay = DisplayID(target) == DisplayID([self sourceScreen]) ? 0 : DisplayID(target);
+  mHomeDisplay = DisplayID(target) == DisplayID([self sourceScreen])
+                     ? 0
+                     : DisplayID(target);
   return YES;
 }
 
 - (void)cancelEdgeHold {
-  mEdgeHoldStart = 0;
+  mEdgeHoldElapsed = NO;
   [mEdgeHoldTimer invalidate];
   mEdgeHoldTimer = nil;
-}
-
-- (void)fadeInAfterHop {
-  NSWindow* window = mWindow;
-  if (!window || mAppearance.reduceMotion) {
-    return;
-  }
-  window.alphaValue = 0.35;
-  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
-    ctx.duration = 0.18;
-    ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
-    window.animator.alphaValue = 1;
-  }];
-}
-
-- (void)overlayMouseUp:(NSEvent*)aEvent {
-  [self gestureEndedAt:NSEvent.mouseLocation
-                  time:aEvent.timestamp
-            clickCount:aEvent.clickCount];
 }
 
 - (void)gestureEndedAt:(NSPoint)aScreenPoint
                   time:(NSTimeInterval)aTime
             clickCount:(NSInteger)aClickCount {
+  [self gestureEndedAt:aScreenPoint
+                  time:aTime
+            clickCount:aClickCount
+             modifiers:0];
+}
+
+- (void)gestureEndedAt:(NSPoint)aScreenPoint
+                  time:(NSTimeInterval)aTime
+            clickCount:(NSInteger)aClickCount
+             modifiers:(NSEventModifierFlags)aModifiers {
   NSWindow* window = mWindow;
   ZenPipGesture gesture = mGesture;
   mGesture = ZenPipGestureNone;
@@ -2505,10 +3113,21 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   if (!window) {
     return;
   }
-  if (gesture == ZenPipGesturePending) {
-    // A click on the video. Double-click toggles playback, like Yab.
-    if (aClickCount == 2) {
+  if (!mGestureMoved &&
+      (gesture == ZenPipGesturePending || gesture == ZenPipGestureResize)) {
+    // A click. Only clicks take the keyboard (as on any window, a
+    // Command-click doesn't); a double-click on the video toggles playback.
+    if (!(aModifiers & NSEventModifierFlagCommand)) {
+      if (window.canBecomeKeyWindow && !window.isKeyWindow) {
+        [window makeKeyWindow];
+      }
+      [window makeFirstResponder:mOverlay];
+    }
+    if (aClickCount == 2 && gesture == ZenPipGesturePending) {
       [self notifyHost:"toggle-play" value:0 detail:nil];
+    }
+    if (mCaughtMoving) {
+      [self releaseWithVelocity:{}];  // caught mid-flight: come to rest here
     }
     [self noteActivity];
     return;
@@ -2519,19 +3138,33 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   if (gesture == ZenPipGestureDrag || gesture == ZenPipGestureCarry) {
-    PointerSample last{aTime, {aScreenPoint.x, aScreenPoint.y}};
-    if (gesture == ZenPipGestureDrag) {
-      mSamples.push_back(last);
+    HEdge stash = mStashArmed;
+    mStashArmed = HEdge::None;
+    if (stash != HEdge::None) {
+      [self stashToward:stash];
+      return;
     }
-    Vec2 velocity = ReleaseVelocity(mSamples, aTime);
-    ReleaseResult result = ResolveRelease(ToRect(window.frame), velocity,
-                                          [self allowedArea], mConfig.release);
-    [self animateTo:result.target velocity:velocity animated:YES];
+    if (gesture == ZenPipGestureDrag) {
+      mSamples.push_back({aTime, {aScreenPoint.x, aScreenPoint.y}});
+    }
+    [self releaseWithVelocity:ReleaseVelocity(mSamples, aTime)];
   }
 }
 
+// A slow release stays where it is (snapping to edges within the magnet
+// distance); a throw glides into the corner it heads for, keeping clear of
+// other players.
+- (void)releaseWithVelocity:(Vec2)aVelocity {
+  ReleaseResult result =
+      ResolveRelease(ToRect(mWindow.frame), aVelocity, [self allowedArea],
+                     mConfig.release, [self otherPlayerFrames]);
+  mRestDock = result.dock;
+  [self animateTo:result.target velocity:aVelocity animated:YES];
+}
+
 - (void)overlayScroll:(NSEvent*)aEvent {
-  if (!mConfig.carryWithTwoFingers || !aEvent.hasPreciseScrollingDeltas) {
+  if (!mConfig.carryWithTwoFingers || !aEvent.hasPreciseScrollingDeltas ||
+      mStashed) {
     return;
   }
   NSEventPhase phase = aEvent.phase;
@@ -2543,6 +3176,7 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     // accumulates the finger deltas.
     [self beginGestureAt:NSZeroPoint time:aEvent.timestamp];
     mGesture = ZenPipGestureCarry;
+    mGestureMoved = YES;
     [self noteActivity];
     return;
   }
@@ -2551,9 +3185,9 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   }
   // Move with the fingers regardless of the scroll-direction preference.
   double sign = aEvent.isDirectionInvertedFromDevice ? 1 : -1;
-  NSPoint carried = NSMakePoint(
-      (mSamples.empty() ? 0 : mSamples.back().position.x) + sign * aEvent.scrollingDeltaX,
-      (mSamples.empty() ? 0 : mSamples.back().position.y) - sign * aEvent.scrollingDeltaY);
+  NSPoint carried =
+      NSMakePoint(mSamples.back().position.x + sign * aEvent.scrollingDeltaX,
+                  mSamples.back().position.y - sign * aEvent.scrollingDeltaY);
   if (phase == NSEventPhaseChanged) {
     [self gestureMovedTo:carried time:aEvent.timestamp];
   } else if (phase == NSEventPhaseEnded || phase == NSEventPhaseCancelled) {
@@ -2563,23 +3197,22 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 
 - (void)overlayMagnify:(NSEvent*)aEvent {
   NSWindow* window = mWindow;
-  if (!window) {
+  if (!window || mStashed) {
     return;
   }
   if (aEvent.phase == NSEventPhaseBegan) {
-    [self stopAnimation];
+    [self beginGestureAt:NSEvent.mouseLocation time:aEvent.timestamp];
     mGesture = ZenPipGesturePinch;
-    mGestureStartFrame = window.frame;
-    mGestureDock = DetectDock(ToRect(window.frame), [self allowedArea], 2);
     mPinchScale = 1;
   } else if (mGesture != ZenPipGesturePinch) {
     return;
   }
   mPinchScale = std::clamp(mPinchScale * (1 + aEvent.magnification), 0.2, 5.0);
-  Box scaled = ScaleFrame(ToRect(mGestureStartFrame), mPinchScale, mAspect, mGestureDock,
-                           [self allowedArea], mConfig.limits);
-  [window setFrame:ToNSRect(scaled) display:YES];
-  if (aEvent.phase == NSEventPhaseEnded || aEvent.phase == NSEventPhaseCancelled) {
+  Box scaled = ScaleFrame(ToRect(mGestureStartFrame), mPinchScale, mAspect,
+                          mGestureDock, [self allowedArea], mConfig.limits);
+  [self setPlayerFrame:ToNSRect(scaled)];
+  if (aEvent.phase == NSEventPhaseEnded ||
+      aEvent.phase == NSEventPhaseCancelled) {
     mGesture = ZenPipGestureNone;
     window.contentAspectRatio = window.frame.size;
     [self reportPlacement];
@@ -2587,112 +3220,271 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   [self noteActivity];
 }
 
-#pragma mark Minimize
+#pragma mark Stash
+
+// The side the player stashes into: the nearer of the left and right sides of
+// its display, unless only the farther one has no display beyond it.
+- (HEdge)stashSide {
+  Box frame = ToRect(mWindow.frame);
+  HEdge nearer = frame.Center().x >= [self allowedArea].Center().x
+                     ? HEdge::Right
+                     : HEdge::Left;
+  HEdge farther = nearer == HEdge::Right ? HEdge::Left : HEdge::Right;
+  if ([self hasDisplayBeyond:nearer of:frame] &&
+      ![self hasDisplayBeyond:farther of:frame]) {
+    return farther;
+  }
+  return nearer;
+}
 
 - (void)minimize {
+  [self stashToward:[self stashSide]];
+}
+
+// The frame just past a side of the player's display, at the height of
+// `aFrame`.
+- (NSRect)offscreenFrameFor:(NSRect)aFrame side:(HEdge)aSide {
+  NSRect screen = [self homeScreen].frame;
+  NSRect frame = aFrame;
+  frame.origin.x = aSide == HEdge::Right
+                       ? NSMaxX(screen) + 1
+                       : NSMinX(screen) - aFrame.size.width - 1;
+  return frame;
+}
+
+// Slides the player off a side of its display, leaving a tab there, the way
+// macOS stashes its own Picture-in-Picture. Where another display continues
+// past that side, and with Reduce Motion, it fades out instead.
+- (void)stashToward:(HEdge)aSide {
   NSWindow* window = mWindow;
-  if (!window || mTucked) {
+  if (!window || mStashed || mExiting) {
     return;
   }
   [self stopAnimation];
-  // The pointer is on the minimize button; don't hide the cursor for it.
-  mPointerInside = NO;
+  mPointerInside =
+      NO;  // the pointer is on the minimize button: keep the cursor
   [self hideControls];
-  mTucked = YES;
-  mTuckTransition = YES;
-  mFrameBeforeTuck = window.frame;
-  if (!mTuckPanel) {
-    mTuckPanel = [[ZenPipTuckPanel alloc] initWithTarget:self action:@selector(onRestore:)];
-    [self applyAppearance];
-    [self refreshAllControls];
+  mStashed = YES;
+  mStashSide = aSide;
+  NSRect frame = window.frame;
+  mFrameBeforeStash = frame;
+  if (!mTab) {
+    mTab = [[ZenPipStashTab alloc] initWithChrome:self];
   }
-  Box area = [self allowedArea];
-  Box frame = ToRect(window.frame);
-  bool right = frame.Center().x >= area.Center().x;
-  CGFloat d = 48;
-  Vec2 origin = ClampOrigin(
-      {right ? area.MaxX() - d : area.MinX(), frame.Center().y - d / 2}, {d, d}, area);
-  [mTuckPanel setFrame:NSMakeRect(origin.x, origin.y, d, d) display:NO];
-  mTuckPanel.alphaValue = 0;
-  [mTuckPanel orderFrontRegardless];
-  BOOL animate = !mAppearance.reduceMotion;
-  [NSAnimationContext
-      runAnimationGroup:^(NSAnimationContext* ctx) {
-        ctx.duration = animate ? 0.18 : 0;
-        window.animator.alphaValue = 0;
-        mTuckPanel.animator.alphaValue = 1;
-      }
-      completionHandler:^{
-        if (window.alphaValue < 0.01) {
-          // Ordered out, the player is no longer composited at all.
-          [window orderOut:nil];
-          window.alphaValue = 1;
-        }
-        self->mTuckTransition = NO;
-      }];
-  [self notifyHost:"tucked" value:1 detail:nil];
-}
-
-- (void)onRestore:(id)aSender {
-  [self restore];
+  [self refreshTab];
+  [self placeTabAt:NSMidY(frame) - kTabHeight / 2];
+  ZenPipStashTab* tab = mTab;
+  tab.alphaValue = 0;
+  [tab orderFrontRegardless];
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = kStashDuration;
+    ctx.timingFunction = EaseOut();
+    tab.animator.alphaValue = 1;
+  }];
+  BOOL slide = !mAppearance.reduceMotion &&
+               ![self hasDisplayBeyond:aSide of:ToRect(frame)];
+  [self animateFrame:slide ? [self offscreenFrameFor:frame side:aSide] : frame
+               alpha:slide ? -1 : 0
+            duration:kStashDuration
+               curve:EaseIn()
+          completion:^(ZenPipPlayerChrome* aChrome) {
+            NSWindow* w = aChrome->mWindow;
+            if (aChrome->mStashed) {
+              // Ordered out, the player is no longer composited at all.
+              [w orderOut:nil];
+              w.alphaValue = 1;
+            }
+          }];
 }
 
 - (void)restore {
   NSWindow* window = mWindow;
-  if (!window || !mTucked) {
+  if (!window || !mStashed || mExiting) {
     return;
   }
-  mTucked = NO;
+  mStashed = NO;
+  [self hideTab];
+  // Back beside the tab, which may have been dragged along the edge.
   Box area = [self allowedArea];
-  Box frame = ToRect(mFrameBeforeTuck);
-  Vec2 origin = ClampOrigin(frame.Origin(), frame.Size(), area);
-  [window setFrame:NSMakeRect(origin.x, origin.y, frame.width, frame.height) display:NO];
-  window.alphaValue = 0;
+  Vec2 size =
+      ClampSize(mFrameBeforeStash.size.width, mAspect, area, mConfig.limits);
+  Vec2 origin =
+      ClampOrigin({mFrameBeforeStash.origin.x, NSMidY(mTab.frame) - size.y / 2},
+                  size, area);
+  NSRect target = NSMakeRect(origin.x, origin.y, size.x, size.y);
+  BOOL slide = !mAppearance.reduceMotion &&
+               ![self hasDisplayBeyond:mStashSide of:ToRect(target)];
+  [self setPlayerFrame:slide ? [self offscreenFrameFor:target side:mStashSide]
+                             : target];
+  window.alphaValue = slide ? 1 : 0;
   [window orderFrontRegardless];
-  ZenPipTuckPanel* panel = mTuckPanel;
-  BOOL animate = !mAppearance.reduceMotion;
-  [NSAnimationContext
-      runAnimationGroup:^(NSAnimationContext* ctx) {
-        ctx.duration = animate ? 0.2 : 0;
-        window.animator.alphaValue = 1;
-        panel.animator.alphaValue = 0;
-      }
-      completionHandler:^{
-        [panel orderOut:nil];
-      }];
-  [self notifyHost:"tucked" value:0 detail:nil];
+  [self animateFrame:target
+               alpha:1
+            duration:kUnstashDuration
+               curve:EaseOut()
+          completion:^(ZenPipPlayerChrome* aChrome) {
+            [aChrome reportPlacement];
+          }];
   [self revealControlsFor:kInitialRevealDuration];
-  [self settleAnimated:YES];
 }
 
-- (void)windowVisibilityChanged {
-  NSWindow* window = mWindow;
-  // Something else (e.g. Gecko focusing the player) showed it again.
-  if (mTucked && !mTuckTransition && window.occlusionState & NSWindowOcclusionStateVisible &&
-      window.isVisible && window.alphaValue > 0.5) {
-    mTucked = NO;
-    [mTuckPanel orderOut:nil];
-    [self notifyHost:"tucked" value:0 detail:nil];
+- (void)hideTab {
+  __weak ZenPipPlayerChrome* weakSelf = self;
+  ZenPipStashTab* tab = mTab;
+  [NSAnimationContext
+      runAnimationGroup:^(NSAnimationContext* ctx) {
+        ctx.duration = kHideDuration;
+        ctx.timingFunction = EaseIn();
+        tab.animator.alphaValue = 0;
+      }
+      completionHandler:^{
+        ZenPipPlayerChrome* chrome = weakSelf;
+        if (chrome && !chrome->mStashed) {
+          [tab orderOut:nil];
+        }
+      }];
+}
+
+// Puts the tab against the stash side of the player's display at about `aY`,
+// clear of the tabs of other stashed players.
+- (void)placeTabAt:(CGFloat)aY {
+  Box visible = [self visibleFrame];
+  CGFloat x =
+      mStashSide == HEdge::Right ? visible.MaxX() - kTabWidth : visible.MinX();
+  std::vector<double> taken;
+  for (ZenPipPlayerChrome* other in AllPlayers()) {
+    ZenPipStashTab* tab = other->mTab;
+    if (other != self && other->mStashed &&
+        std::abs(NSMinX(tab.frame) - x) < 1) {
+      taken.push_back(NSMinY(tab.frame));
+    }
   }
+  CGFloat y = NearestFreeSlot(aY, kTabHeight + kTabGap, visible.MinY(),
+                              visible.MaxY() - kTabHeight, taken);
+  [mTab setFrame:NSMakeRect(x, y, kTabWidth, kTabHeight) display:YES];
+}
+
+- (void)refreshTab {
+  if (!mTab) {
+    return;
+  }
+  NSString* label = [self string:@"restore"
+                        fallback:@"Show Picture-in-Picture"];
+  ZenPipStashTabView* view = mTab.tabView;
+  view.accessibilityLabel = label;
+  view.toolTip = label;
+  view.chevron.image =
+      Symbol(mStashSide == HEdge::Left ? @"chevron.compact.right"
+                                       : @"chevron.compact.left",
+             15, [self symbolWeight]);
+}
+
+- (void)tabPressed {
+  // Restored from the keyboard, the player keeps the keyboard; a click on
+  // the tab leaves it with the app the user is in.
+  BOOL fromKeyboard = mTab.isKeyWindow;
+  [self restore];
+  if (fromKeyboard) {
+    [mWindow makeKeyWindow];
+    [self focusControls];
+  }
+}
+
+- (void)tabMovedTo:(CGFloat)aY {
+  [self placeTabAt:aY];
+}
+
+- (void)windowOcclusionChanged:(NSNotification*)aNote {
+  NSWindow* window = mWindow;
+  // Something else showed the stashed player again (Gecko focusing it, the
+  // Window menu).
+  if (mStashed && mFrameAnimations == 0 && window.isVisible &&
+      window.alphaValue > 0.5 &&
+      (window.occlusionState & NSWindowOcclusionStateVisible)) {
+    mStashed = NO;
+    [self hideTab];
+    [self settleAnimated:YES];
+  }
+}
+
+#pragma mark Transitions
+
+- (BOOL)rectIsOnHomeScreen:(NSRect)aRect {
+  NSScreen* home = [self homeScreen];
+  return !NSIsEmptyRect(aRect) && home && NSIntersectsRect(aRect, home.frame);
+}
+
+- (void)playEntranceFrom:(NSRect)aRect {
+  NSWindow* window = mWindow;
+  if (!window || mExiting || mStashed) {
+    return;
+  }
+  NSRect target = window.frame;
+  if (!mAppearance.reduceMotion && [self rectIsOnHomeScreen:aRect]) {
+    [self setPlayerFrame:aRect];
+    [self animateFrame:target
+                 alpha:-1
+              duration:kEntranceDuration
+                 curve:EaseOut()
+            completion:^(ZenPipPlayerChrome* aChrome) {
+              [aChrome settleAnimated:NO];
+            }];
+    return;
+  }
+  window.alphaValue = 0;
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = kEntranceDuration;
+    ctx.timingFunction = EaseOut();
+    window.animator.alphaValue = 1;
+  }];
+}
+
+- (void)playExitTo:(NSRect)aRect {
+  NSWindow* window = mWindow;
+  if (mExiting) {
+    return;  // the first exit notifies
+  }
+  mExiting = YES;
+  [self stopAnimation];
+  [self cancelEdgeHold];
+  mGesture = ZenPipGestureNone;
+  mOwnsPress = NO;
+  if (!window || mStashed) {
+    [mTab orderOut:nil];
+    [self notifyHost:"exit-done" value:0 detail:nil];
+    return;
+  }
+  BOOL shrink = !mAppearance.reduceMotion && [self rectIsOnHomeScreen:aRect];
+  [self animateFrame:shrink ? aRect : window.frame
+               alpha:0
+            duration:shrink ? kShrinkDuration : kExitFadeDuration
+               curve:shrink ? EaseInOut() : EaseIn()
+          completion:^(ZenPipPlayerChrome* aChrome) {
+            [aChrome notifyHost:"exit-done" value:0 detail:nil];
+          }];
 }
 
 #pragma mark Diagnostics and tests
 
 - (NSString*)glassStyleOf:(NSView*)aMaterial {
   if (@available(macOS 26.0, *)) {
-    if ([aMaterial isKindOfClass:[NSGlassEffectView class]]) {
-      return ((NSGlassEffectView*)aMaterial).style == NSGlassEffectViewStyleClear ? @"clear"
-                                                                                 : @"regular";
-    }
+    return ((NSGlassEffectView*)aMaterial).style == NSGlassEffectViewStyleClear
+               ? @"clear"
+               : @"regular";
   }
   return @"visual-effect";
 }
 
 - (BOOL)glassIsTinted:(NSView*)aMaterial {
   if (@available(macOS 26.0, *)) {
-    if ([aMaterial isKindOfClass:[NSGlassEffectView class]]) {
-      return ((NSGlassEffectView*)aMaterial).tintColor != nil;
-    }
+    return ((NSGlassEffectView*)aMaterial).tintColor != nil;
+  }
+  return NO;
+}
+
+- (BOOL)glassIsInteractive:(NSView*)aMaterial {
+  if (@available(macOS 27.0, *)) {
+    return ((NSGlassEffectView*)aMaterial).effectIsInteractive;
   }
   return NO;
 }
@@ -2715,7 +3507,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"hidden" : @(c.isHidden),
       @"enabled" : @(c.button.isEnabled),
       @"accessibilityLabel" : c.button.accessibilityLabel ?: @"",
-      @"symbol" : c.button.image.accessibilityDescription ?: c.button.title ?: @"",
+      @"symbol" : c.button.image.accessibilityDescription ?: @"",
+      @"title" : c.button.title ?: @"",
       @"interactiveGlass" : @([self glassIsInteractive:c.material]),
       @"statusOnly" : @(c.statusOnly),
     }];
@@ -2728,16 +3521,19 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
         @"title" : item.title,
         @"rate" : item.representedObject,
         @"checked" : @(item.state == NSControlStateValueOn),
+        @"enabled" : @([self validateMenuItem:item]),
       }];
     }
   }
   NSScreen* screen = [self sourceScreen];
   return @{
     @"speed" : @{
-      @"symbol" : mSpeedSymbol ?: @"",
+      @"title" : mSpeed.button.title ?: @"",
       @"tooltip" : mSpeed.button.toolTip ?: @"",
-      @"accessibilityValue" : mSpeed.button.accessibilityValueDescription ?: @"",
-      @"menuTitle" : speedMenu.numberOfItems ? [speedMenu itemAtIndex:0].title : @"",
+      @"accessibilityValue" : mSpeed.button.accessibilityValueDescription
+          ?: @"",
+      @"menuTitle" : speedMenu.numberOfItems ? [speedMenu itemAtIndex:0].title
+                                             : @"",
       @"menu" : speedItems,
     },
     @"liquidGlass" : @([ZenPipPlayerChrome hasLiquidGlass]),
@@ -2750,6 +3546,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     @"windowNumber" : @(window.windowNumber),
     @"windowVisible" : @(window.isVisible),
     @"windowMovableBySystem" : @(window.movable),
+    @"windowHidesWithApp" : @(window.canHide),
+    @"cornerRadius" : @(window.contentView.layer.cornerRadius),
     @"sourceWindowFrame" : source ? rect(source.frame) : @[],
     @"sourceScreen" : screen ? screen.localizedName : @"",
     @"sourceScreenFrame" : screen ? rect(screen.frame) : @[],
@@ -2758,14 +3556,20 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     @"homeScreen" : [self homeScreen].localizedName ?: @"",
     @"homePinned" : @([self homeIsPinned]),
     @"allowedArea" : rect(ToNSRect([self allowedArea])),
-    @"insideAllowedArea" : @([self allowedArea].Contains(ToRect(window.frame), 0.75)),
-    @"insideVisibleFrame" : @([self visibleFrame].Contains(ToRect(window.frame), 0.75)),
-    @"dock" : DockName(DetectDock(ToRect(window.frame), [self allowedArea], 2)),
-    @"animating" : @(mAnimating),
-    @"tucked" : @(mTucked),
-    @"tuckPanelVisible" : @(mTuckPanel.isVisible),
-    @"tuckPanelFrame" : mTuckPanel ? rect(mTuckPanel.frame) : @[],
+    @"insideAllowedArea" :
+        @([self allowedArea].Contains(ToRect(window.frame), 0.75)),
+    @"insideVisibleFrame" :
+        @([self visibleFrame].Contains(ToRect(window.frame), 0.75)),
+    @"dock" : DockName(
+        DetectDock(ToRect(window.frame), [self allowedArea], kDockTolerance)),
+    @"restDock" : DockName(mRestDock),
+    @"animating" : @([self isAnimating]),
+    @"tucked" : @(mStashed),
+    @"stashSide" : mStashSide == HEdge::Left ? @"left" : @"right",
+    @"tuckPanelVisible" : @(mTab.isVisible),
+    @"tuckPanelFrame" : mTab ? rect(mTab.frame) : @[],
     @"aspect" : @(mAspect),
+    @"spinnerVisible" : @(mShowsSpinner),
     @"timeline" : @{
       @"hidden" : @(mTimeline.isHidden),
       @"elapsed" : mTimeline.elapsed.stringValue ?: @"",
@@ -2773,30 +3577,33 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       @"position" : @(mTimeline.slider.doubleValue),
       @"frame" : rect(mTimeline.frame),
       @"labelsShown" : @(mTimeline.showsLabels),
-      @"accessibilityValue" : mTimeline.slider.accessibilityValueDescription ?: @"",
+      @"accessibilityValue" : mTimeline.slider.accessibilityValueDescription
+          ?: @"",
     },
     @"state" : @{
       @"playing" : @(mPlaying),
       @"muted" : @(mMuted),
+      @"volume" : @(mVolume),
       @"rate" : @(mRate),
+      @"buffering" : @(mBuffering),
+      @"ended" : @(mEnded),
       @"captionsAvailable" : @(mCaptionsAvailable),
       @"captionsEnabled" : @(mCaptionsEnabled),
       @"live" : @(mLive),
       @"seekable" : @(mSeekable),
       @"atLiveEdge" : @(mAtLiveEdge),
     },
-    @"liveDotRed" : @(mLiveDotRed),
+    @"liveDotRed" : @(mLive && (!mSeekable || mAtLiveEdge)),
     @"accessibility" : @{
       @"reduceMotion" : @(mAppearance.reduceMotion),
-      @"reduceTransparency" : @(mAppearance.reduceTransparency),
       @"increaseContrast" : @(mAppearance.increaseContrast),
       @"voiceOver" : @(mAppearance.voiceOver),
     },
     @"firstResponder" : NSStringFromClass([window.firstResponder class]) ?: @"",
+    @"keyWindow" : @(window.isKeyWindow),
     @"focusedControl" : [self focusedControlName] ?: @"",
     @"glassStyle" : [self glassStyleOf:mPlay.material],
     @"glassTinted" : @([self glassIsTinted:mPlay.material]),
-    @"pillGlassStyle" : mTuckPanel ? [self glassStyleOf:mTuckPanel.control.material] : @"",
     @"dimmingOpacity" : @(CGColorGetAlpha(mScrim.layer.backgroundColor)),
     @"scrimVisible" : @(!mScrim.isHidden && mScrim.alphaValue > 0),
   };
@@ -2829,16 +3636,17 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   }
   // Dispatched through the window like a real key press, so it reaches the
   // current first responder (the overlay or a focused control).
-  NSEvent* event = [NSEvent keyEventWithType:NSEventTypeKeyDown
-                                    location:NSZeroPoint
-                               modifierFlags:aModifiers
-                                   timestamp:NSProcessInfo.processInfo.systemUptime
-                                windowNumber:window.windowNumber
-                                     context:nil
-                                  characters:aCharacters
-                 charactersIgnoringModifiers:aCharacters
-                                   isARepeat:NO
-                                     keyCode:aKeyCode];
+  NSEvent* event =
+      [NSEvent keyEventWithType:NSEventTypeKeyDown
+                             location:NSZeroPoint
+                        modifierFlags:aModifiers
+                            timestamp:NSProcessInfo.processInfo.systemUptime
+                         windowNumber:window.windowNumber
+                              context:nil
+                           characters:aCharacters
+          charactersIgnoringModifiers:aCharacters
+                            isARepeat:NO
+                              keyCode:aKeyCode];
   [window sendEvent:event];
 }
 
@@ -2890,9 +3698,11 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     @"center" : [NSValue valueWithPoint:NSMakePoint(mx, my)],
   };
   NSValue* place = words.count ? places[words[0]] : nil;
-  NSArray<NSString*>* xy = words.count ? [words[0] componentsSeparatedByString:@","] : @[];
+  NSArray<NSString*>* xy =
+      words.count ? [words[0] componentsSeparatedByString:@","] : @[];
   if (!place && xy.count == 2) {
-    place = [NSValue valueWithPoint:NSMakePoint(xy[0].doubleValue, xy[1].doubleValue)];
+    place = [NSValue
+        valueWithPoint:NSMakePoint(xy[0].doubleValue, xy[1].doubleValue)];
   }
   if (!place || clicks < 1 || clicks > 4) {
     return NO;
@@ -2915,8 +3725,10 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     if (click == clicks && (drag.x != 0 || drag.y != 0)) {
       constexpr int kDragSteps = 12;
       for (int i = 1; i <= kDragSteps; i++) {
-        end = NSMakePoint(start.x + drag.x * i / kDragSteps, start.y + drag.y * i / kDragSteps);
-        steps.push_back({NSEventTypeLeftMouseDragged, end, click, at + 0.03 + 0.012 * i});
+        end = NSMakePoint(start.x + drag.x * i / kDragSteps,
+                          start.y + drag.y * i / kDragSteps);
+        steps.push_back(
+            {NSEventTypeLeftMouseDragged, end, click, at + 0.03 + 0.012 * i});
       }
       at += 0.03 + 0.012 * kDragSteps;
     }
@@ -2935,19 +3747,25 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                     repeats:YES
                       block:^(NSTimer* aTimer) {
                         NSWindow* w = weakWindow;
-                        NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
-                        if (w && next < steps.size() && steps[next].at <= now - t0) {
+                        NSTimeInterval now =
+                            NSProcessInfo.processInfo.systemUptime;
+                        if (w && next < steps.size() &&
+                            steps[next].at <= now - t0) {
                           const Step& s = steps[next++];
                           NSEvent* event = [NSEvent
                               mouseEventWithType:s.type
-                                        location:[w convertPointFromScreen:s.screen]
+                                        location:
+                                            [w convertPointFromScreen:s.screen]
                                    modifierFlags:0
                                        timestamp:now
                                     windowNumber:w.windowNumber
                                          context:nil
                                      eventNumber:0
                                       clickCount:s.count
-                                        pressure:s.type == NSEventTypeLeftMouseUp ? 0 : 1];
+                                        pressure:s.type ==
+                                                         NSEventTypeLeftMouseUp
+                                                     ? 0
+                                                     : 1];
                           [NSApp postEvent:event atStart:NO];
                         }
                         if (!w || next >= steps.size()) {
@@ -2956,16 +3774,6 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
                       }];
   [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
   return YES;
-}
-
-- (BOOL)glassIsInteractive:(NSView*)aMaterial {
-  if (@available(macOS 27.0, *)) {
-    if ([aMaterial isKindOfClass:[NSGlassEffectView class]] &&
-        [aMaterial respondsToSelector:@selector(effectIsInteractive)]) {
-      return ((NSGlassEffectView*)aMaterial).effectIsInteractive;
-    }
-  }
-  return NO;
 }
 
 - (void)testDragBy:(NSPoint)aDelta
@@ -2984,14 +3792,17 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   int steps = std::max(2, (int)lround(aDuration * 120));
   for (int i = 1; i <= steps; i++) {
     double f = (double)i / steps;
-    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f, start.y + aDelta.y * f)
+    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f,
+                                     start.y + aDelta.y * f)
                     time:t0 + aDuration * f];
   }
   // The last 80 ms of samples define the release velocity.
   NSTimeInterval tEnd = t0 + aDuration;
   NSPoint end = NSMakePoint(start.x + aDelta.x, start.y + aDelta.y);
   mSamples.clear();
-  mSamples.push_back({tEnd - 0.05, {end.x - aReleaseVelocity.x * 0.05, end.y - aReleaseVelocity.y * 0.05}});
+  mSamples.push_back(
+      {tEnd - 0.05,
+       {end.x - aReleaseVelocity.x * 0.05, end.y - aReleaseVelocity.y * 0.05}});
   mSamples.push_back({tEnd, {end.x, end.y}});
   if (mGesture != ZenPipGestureDrag) {
     mGesture = ZenPipGestureDrag;
@@ -3000,8 +3811,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
 }
 
 - (void)testDragBy:(NSPoint)aDelta
-              duration:(NSTimeInterval)aDuration
-     restBeforeRelease:(NSTimeInterval)aRest {
+             duration:(NSTimeInterval)aDuration
+    restBeforeRelease:(NSTimeInterval)aRest {
   NSWindow* window = mWindow;
   if (!window) {
     return;
@@ -3013,12 +3824,15 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   int steps = std::max(2, (int)lround(aDuration * 120));
   for (int i = 1; i <= steps; i++) {
     double f = (double)i / steps;
-    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f, start.y + aDelta.y * f)
+    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f,
+                                     start.y + aDelta.y * f)
                     time:t0 + aDuration * f];
   }
-  [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:aRest]];
+  [NSRunLoop.mainRunLoop
+      runUntilDate:[NSDate dateWithTimeIntervalSinceNow:aRest]];
   NSPoint end = mLastGesturePoint;
-  NSTimeInterval tEnd = std::max(NSProcessInfo.processInfo.systemUptime, t0 + aDuration + aRest);
+  NSTimeInterval tEnd =
+      std::max(NSProcessInfo.processInfo.systemUptime, t0 + aDuration + aRest);
   mSamples.clear();
   mSamples.push_back({tEnd - 0.05, {end.x, end.y}});
   mSamples.push_back({tEnd, {end.x, end.y}});
@@ -3029,10 +3843,12 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   // 16 ms apart, then the fingers rest 150 ms before lifting, so the release
   // is a placement rather than a throw.
   uint64_t t = (uint64_t)(NSProcessInfo.processInfo.systemUptime * 1e9);
-  auto send = [&](CGScrollPhase aPhase, double aDx, double aDy, uint64_t aAdvance) {
+  auto send = [&](CGScrollPhase aPhase, double aDx, double aDy,
+                  uint64_t aAdvance) {
     t += aAdvance;
-    CGEventRef cg = CGEventCreateScrollWheelEvent2(nullptr, kCGScrollEventUnitPixel, 2,
-                                                   (int32_t)lround(aDy), (int32_t)lround(aDx), 0);
+    CGEventRef cg = CGEventCreateScrollWheelEvent2(
+        nullptr, kCGScrollEventUnitPixel, 2, (int32_t)lround(aDy),
+        (int32_t)lround(aDx), 0);
     if (!cg) {
       return;
     }
@@ -3056,9 +3872,12 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   NSDictionary* handles = @{
-    @"left" : @((int)ResizeHandle::Left), @"right" : @((int)ResizeHandle::Right),
-    @"top" : @((int)ResizeHandle::Top), @"bottom" : @((int)ResizeHandle::Bottom),
-    @"top-left" : @((int)ResizeHandle::TopLeft), @"top-right" : @((int)ResizeHandle::TopRight),
+    @"left" : @((int)ResizeHandle::Left),
+    @"right" : @((int)ResizeHandle::Right),
+    @"top" : @((int)ResizeHandle::Top),
+    @"bottom" : @((int)ResizeHandle::Bottom),
+    @"top-left" : @((int)ResizeHandle::TopLeft),
+    @"top-right" : @((int)ResizeHandle::TopRight),
     @"bottom-left" : @((int)ResizeHandle::BottomLeft),
     @"bottom-right" : @((int)ResizeHandle::BottomRight),
   };
@@ -3073,7 +3892,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
   NSPoint start = mGestureStartMouse;
   for (int i = 1; i <= 12; i++) {
     double f = i / 12.0;
-    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f, start.y + aDelta.y * f)
+    [self gestureMovedTo:NSMakePoint(start.x + aDelta.x * f,
+                                     start.y + aDelta.y * f)
                     time:t0 + 0.2 * f];
   }
   [self gestureEndedAt:NSMakePoint(start.x + aDelta.x, start.y + aDelta.y)
@@ -3094,17 +3914,19 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     [self showControls];
     mTimeline.slider.doubleValue =
         std::clamp([[aName substringFromIndex:9] doubleValue], 0.0, 1.0);
-    [mTimeline.slider sendAction:mTimeline.slider.action to:mTimeline.slider.target];
+    [mTimeline.slider sendAction:mTimeline.slider.action
+                              to:mTimeline.slider.target];
     return YES;
   }
   if ([aName isEqualToString:@"restore"]) {
-    if (!mTuckPanel.isVisible) {
+    if (!mTab.isVisible) {
       return NO;
     }
-    [mTuckPanel.control.button performClick:nil];
+    [self tabPressed];
     return YES;
   }
-  if (!control || control.isHidden || !control.button.isEnabled || control.statusOnly) {
+  if (!control || control.isHidden || !control.button.isEnabled ||
+      control.statusOnly) {
     return NO;
   }
   if (control == mSpeed) {
@@ -3134,7 +3956,8 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
         }
       }
     } else if (rateItems.count) {
-      pick = rateItems[(NSUInteger)(checked + 1) % rateItems.count].integerValue;
+      pick =
+          rateItems[(NSUInteger)(checked + 1) % rateItems.count].integerValue;
     }
     if (pick < 0) {
       return NO;
@@ -3154,37 +3977,37 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
     return;
   }
   mInvalidated = YES;
-  if (mClickMonitor) {
-    [NSEvent removeMonitor:mClickMonitor];
-    mClickMonitor = nil;
+  [AllPlayers() removeObject:self];
+  if (mPressMonitor) {
+    [NSEvent removeMonitor:mPressMonitor];
+    mPressMonitor = nil;
   }
   [self stopAnimation];
   [self cancelEdgeHold];
   [mHideTimer invalidate];
   mHideTimer = nil;
-  for (id observer in mObservers) {
-    [NSNotificationCenter.defaultCenter removeObserver:observer];
+  [mSpinnerTimer invalidate];
+  mSpinnerTimer = nil;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self];
+  if (mObserving) {
+    mObserving = NO;
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
+    [NSWorkspace.sharedWorkspace removeObserver:self
+                                     forKeyPath:@"voiceOverEnabled"
+                                        context:kVoiceOverContext];
   }
-  [mObservers removeAllObjects];
-  for (id observer in mWorkspaceObservers) {
-    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:observer];
-  }
-  [mWorkspaceObservers removeAllObjects];
-  @try {
-    [NSWorkspace.sharedWorkspace removeObserver:self forKeyPath:@"voiceOverEnabled"];
-  } @catch (NSException*) {
-  }
-  [mTuckPanel orderOut:nil];
-  [mTuckPanel close];
-  mTuckPanel = nil;
+  [mTab orderOut:nil];
+  [mTab close];
+  mTab = nil;
   NSWindow* window = mWindow;
   if (window) {
     window.movable = mWasMovable;
-    window.alphaValue = 1;
-    NSResponder* firstResponder = window.firstResponder;
-    BOOL ownsFocus = firstResponder == mOverlay ||
-                     [firstResponder isKindOfClass:[ZenPipButtonCore class]] ||
-                     [firstResponder isKindOfClass:[ZenPipSlider class]];
+    if (!mExiting) {
+      window.alphaValue = 1;
+    }
+    BOOL ownsFocus =
+        window.firstResponder == mOverlay || [self keyboardFocusInControls];
     if (ownsFocus && window.isVisible) {
       // Hand keyboard focus back to Gecko once the current event is done, and
       // only if the window is still around (not while it is being torn down).
@@ -3193,14 +4016,13 @@ typedef NS_ENUM(NSInteger, ZenPipGesture) {
       dispatch_async(dispatch_get_main_queue(), ^{
         NSWindow* w = weakWindow;
         NSResponder* r = previous;
-        if (w.isVisible && r && [r isKindOfClass:[NSView class]] &&
+        if (w.isVisible && [r isKindOfClass:[NSView class]] &&
             ((NSView*)r).window == w) {
           [w makeFirstResponder:r];
         }
       });
     }
   }
-  [mOverlay removeAllTracking];
   mOverlay.chrome = nil;
   [mOverlay removeFromSuperview];
   mOverlay = nil;

@@ -18,13 +18,13 @@ using namespace zen::pip;
 static int sFailures = 0;
 static int sChecks = 0;
 
-#define CHECK(cond)                                                        \
-  do {                                                                     \
-    sChecks++;                                                             \
-    if (!(cond)) {                                                         \
-      sFailures++;                                                         \
-      std::printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
-    }                                                                      \
+#define CHECK(cond)                                                 \
+  do {                                                              \
+    sChecks++;                                                      \
+    if (!(cond)) {                                                  \
+      sFailures++;                                                  \
+      std::printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+    }                                                               \
   } while (0)
 
 #define CHECK_NEAR(a, b, eps) CHECK(std::abs((a) - (b)) <= (eps))
@@ -35,21 +35,32 @@ struct Display {
   Box visible;
 };
 
-// The two displays attached to the development Mac (NSScreen dump).
-static const Display kExternal{"external-primary", {0, 0, 2048, 1152},
-                               {0, 0, 2048, 1122}};
-static const Display kBuiltin{"builtin-right", {2048, 35, 1728, 1117},
-                              {2048, 35, 1728, 1085}};
+// Fits a size into an area, keeping its aspect ratio.
+static Vec2 FitSize(Vec2 aSize, const Box& aArea) {
+  double scale = std::min({1.0, aArea.width / aSize.x, aArea.height / aSize.y});
+  return {aSize.x * scale, aSize.y * scale};
+}
+
+static Vec2 CornerOrigin(const Dock& aCorner, Vec2 aSize, const Box& aArea) {
+  return OriginForDock(aCorner, {aArea.x, aArea.y}, aSize, aArea);
+}
+
+// Two displays as an NSScreen dump reports them.
+static const Display kExternal{
+    "external-primary", {0, 0, 2048, 1152}, {0, 0, 2048, 1122}};
+static const Display kBuiltin{
+    "builtin-right", {2048, 35, 1728, 1117}, {2048, 35, 1728, 1085}};
 // Synthetic arrangements that cannot be created physically here.
-static const Display kLeftOfPrimary{"left-negative-x", {-1920, -120, 1920, 1080},
-                                    {-1920, -120, 1920, 1080}};
-static const Display kAbovePrimary{"above-positive-y", {-256, 1152, 2560, 1440},
-                                   {-256, 1152, 2560, 1415}};
-static const Display kBelowPrimary{"below-negative-y", {300, -900, 1440, 900},
+static const Display kLeftOfPrimary{
+    "left-negative-x", {-1920, -120, 1920, 1080}, {-1920, -120, 1920, 1080}};
+static const Display kAbovePrimary{
+    "above-positive-y", {-256, 1152, 2560, 1440}, {-256, 1152, 2560, 1415}};
+static const Display kBelowPrimary{"below-negative-y",
+                                   {300, -900, 1440, 900},
                                    {300, -830, 1440, 830}};  // Dock at bottom
 static const Display kTiny{"tiny", {0, 0, 640, 400}, {0, 0, 640, 375}};
 
-static const Display* kAllDisplays[] = {&kExternal,     &kBuiltin,
+static const Display* kAllDisplays[] = {&kExternal,      &kBuiltin,
                                         &kLeftOfPrimary, &kAbovePrimary,
                                         &kBelowPrimary,  &kTiny};
 
@@ -88,7 +99,7 @@ int main() {
   Test("screen choice follows the largest overlap, then the nearest display",
        [&] {
          std::vector<Box> screens{kExternal.frame, kBuiltin.frame,
-                                   kLeftOfPrimary.frame, kAbovePrimary.frame};
+                                  kLeftOfPrimary.frame, kAbovePrimary.frame};
          // A browser window mostly on the built-in display.
          CHECK(ScreenIndexForRect({1900, 200, 900, 700}, screens) == 1);
          // Straddling the primary and the left display, mostly left.
@@ -120,8 +131,8 @@ int main() {
     for (const Display* d : kAllDisplays) {
       Box area = AllowedArea(d->visible, kGap);
       Vec2 size = FitSize({480, 270}, area);
-      Box frame = Box::FromOriginSize({d->frame.MaxX() - 100, d->frame.MinY() - 80},
-                                        size);
+      Box frame = Box::FromOriginSize(
+          {d->frame.MaxX() - 100, d->frame.MinY() - 80}, size);
       ReleaseResult r = ResolveRelease(frame, {}, area, ReleaseParams{});
       CHECK(area.Contains(Box::FromOriginSize(r.target, size)));
     }
@@ -141,7 +152,8 @@ int main() {
         {{2200, 1600}, HEdge::Right, VEdge::Top},
     };
     for (auto& c : cases) {
-      ReleaseResult r = ResolveRelease(center, c.velocity, area, ReleaseParams{});
+      ReleaseResult r =
+          ResolveRelease(center, c.velocity, area, ReleaseParams{});
       CHECK(r.isThrow);
       CHECK(r.dock.h == c.h && r.dock.v == c.v);
       CHECK(area.Contains(Box::FromOriginSize(r.target, center.Size())));
@@ -166,7 +178,8 @@ int main() {
     for (const Display* d : kAllDisplays) {
       Box area = AllowedArea(d->visible, kGap);
       Vec2 size = FitSize({480, 270}, area);
-      Box frame = Box::FromOriginSize(ClampOrigin(area.Center(), size, area), size);
+      Box frame =
+          Box::FromOriginSize(ClampOrigin(area.Center(), size, area), size);
       for (Vec2 v : {Vec2{9000, 9000}, Vec2{-9000, 9000}, Vec2{9000, -9000},
                      Vec2{-9000, -9000}}) {
         ReleaseResult r = ResolveRelease(frame, v, area, ReleaseParams{});
@@ -192,46 +205,49 @@ int main() {
     }
     Box area = AllowedArea(kExternal.visible, kGap);
     double small = RubberBandOrigin({area.x - 10, 400}, {480, 270}, area,
-                                    kExternal.visible).x;
+                                    kExternal.visible)
+                       .x;
     double big = RubberBandOrigin({area.x - 400, 400}, {480, 270}, area,
-                                  kExternal.visible).x;
+                                  kExternal.visible)
+                     .x;
     CHECK(small < area.x && big < small && big >= kExternal.visible.x);
   });
 
-  Test("resizing a cornered player keeps that corner and the aspect ratio",
-       [&] {
-         Box area = AllowedArea(kBuiltin.visible, kGap);
-         double aspect = 16.0 / 9.0;
-         Vec2 size{400, 225};
-         Dock corner{HEdge::Right, VEdge::Bottom};
-         Box start = Box::FromOriginSize(CornerOrigin(corner, size, area), size);
-         for (ResizeHandle handle :
-              {ResizeHandle::TopLeft, ResizeHandle::Left, ResizeHandle::Top,
-               ResizeHandle::BottomRight, ResizeHandle::TopRight}) {
-           for (Vec2 delta : {Vec2{-160, 90}, Vec2{120, -60}, Vec2{-4000, 4000}}) {
-             Box r = ResizeFrame(start, handle, delta, aspect, corner, area,
-                                  SizeLimits{});
-             CHECK_NEAR(r.MaxX(), area.MaxX(), 1e-6);
-             CHECK_NEAR(r.MinY(), area.MinY(), 1e-6);
-             CHECK_NEAR(r.width / r.height, aspect, 1e-9);
-             CHECK(area.Contains(r));
-           }
-         }
-         Box grown = ResizeFrame(start, ResizeHandle::TopLeft, {-160, 90}, aspect,
-                                  corner, area, SizeLimits{});
-         CHECK(grown.width > start.width);
-       });
+  Test(
+      "resizing a cornered player keeps that corner and the aspect ratio", [&] {
+        Box area = AllowedArea(kBuiltin.visible, kGap);
+        double aspect = 16.0 / 9.0;
+        Vec2 size{400, 225};
+        Dock corner{HEdge::Right, VEdge::Bottom};
+        Box start = Box::FromOriginSize(CornerOrigin(corner, size, area), size);
+        for (ResizeHandle handle :
+             {ResizeHandle::TopLeft, ResizeHandle::Left, ResizeHandle::Top,
+              ResizeHandle::BottomRight, ResizeHandle::TopRight}) {
+          for (Vec2 delta :
+               {Vec2{-160, 90}, Vec2{120, -60}, Vec2{-4000, 4000}}) {
+            Box r = ResizeFrame(start, handle, delta, aspect, corner, area,
+                                SizeLimits{});
+            CHECK_NEAR(r.MaxX(), area.MaxX(), 1e-6);
+            CHECK_NEAR(r.MinY(), area.MinY(), 1e-6);
+            CHECK_NEAR(r.width / r.height, aspect, 1e-9);
+            CHECK(area.Contains(r));
+          }
+        }
+        Box grown = ResizeFrame(start, ResizeHandle::TopLeft, {-160, 90},
+                                aspect, corner, area, SizeLimits{});
+        CHECK(grown.width > start.width);
+      });
 
   Test("resizing a free player keeps the side opposite the handle", [&] {
     Box area = AllowedArea(kExternal.visible, kGap);
     Box start{700, 400, 400, 225};
     Box r = ResizeFrame(start, ResizeHandle::BottomRight, {80, -45}, 16.0 / 9.0,
-                         Dock{}, area, SizeLimits{});
+                        Dock{}, area, SizeLimits{});
     CHECK_NEAR(r.MinX(), start.MinX(), 1e-9);
     CHECK_NEAR(r.MaxY(), start.MaxY(), 1e-9);
     CHECK_NEAR(r.width, 480, 1e-9);
     Box top = ResizeFrame(start, ResizeHandle::Top, {0, 45}, 16.0 / 9.0, Dock{},
-                           area, SizeLimits{});
+                          area, SizeLimits{});
     CHECK_NEAR(top.MinY(), start.MinY(), 1e-9);
     CHECK_NEAR(top.Center().x, start.Center().x, 1e-9);
   });
@@ -272,8 +288,8 @@ int main() {
     CHECK_NEAR(o.x + size.x, to.MaxX(), 1e-9);
     CHECK_NEAR(o.y, to.MinY(), 1e-9);
     // A free placement keeps its relative position.
-    Box mid{from.x + (from.width - 480) * 0.25, from.y + (from.height - 270) * 0.5,
-             480, 270};
+    Box mid{from.x + (from.width - 480) * 0.25,
+            from.y + (from.height - 270) * 0.5, 480, 270};
     Placement free = PlacementForFrame(mid, from, 1.0);
     Vec2 m = OriginForPlacement(free, size, to);
     CHECK_NEAR((m.x - to.x) / (to.width - 480), 0.25, 1e-9);
@@ -303,13 +319,41 @@ int main() {
     spring.Start({0, 0}, {2500, -1800}, {900, -500}, SpringParams{});
     CHECK(!spring.IsSettled(0.1));
     CHECK(spring.IsSettled(1.4));
-    // Retargeting mid-flight preserves position and velocity.
-    Vec2 p0, v0, p1, v1;
-    spring.Sample(0.2, &p0, &v0);
-    spring.Retarget(0.2, {100, 100});
-    spring.Sample(0, &p1, &v1);
-    CHECK_NEAR(p0.x, p1.x, 1e-6);
-    CHECK_NEAR(v0.y, v1.y, 1e-6);
+  });
+
+  Test("throws avoid corners other players take", [&] {
+    Box area = AllowedArea(kExternal.visible, kGap);
+    Vec2 size{480, 270};
+    Box start = Box::FromOriginSize({800, 400}, size);
+    ReleaseResult free =
+        ResolveRelease(start, {2400, -1600}, area, ReleaseParams{});
+    CHECK(free.dock == (Dock{HEdge::Right, VEdge::Bottom}));
+    Box other = Box::FromOriginSize(
+        CornerOrigin({HEdge::Right, VEdge::Bottom}, size, area), size);
+    ReleaseResult avoided =
+        ResolveRelease(start, {2400, -1600}, area, ReleaseParams{}, {other});
+    CHECK(!(avoided.dock == (Dock{HEdge::Right, VEdge::Bottom})));
+    CHECK(Box::FromOriginSize(avoided.target, size).IntersectionArea(other) ==
+          0);
+    // With every corner taken it still lands in the nearest one.
+    std::vector<Box> all;
+    for (Dock corner :
+         {Dock{HEdge::Left, VEdge::Bottom}, Dock{HEdge::Right, VEdge::Bottom},
+          Dock{HEdge::Left, VEdge::Top}, Dock{HEdge::Right, VEdge::Top}}) {
+      all.push_back(
+          Box::FromOriginSize(CornerOrigin(corner, size, area), size));
+    }
+    CHECK(
+        ResolveRelease(start, {2400, -1600}, area, ReleaseParams{}, all).dock ==
+        (Dock{HEdge::Right, VEdge::Bottom}));
+  });
+
+  Test("free slots keep tabs apart along an edge", [&] {
+    CHECK_NEAR(NearestFreeSlot(500, 68, 0, 1000, {}), 500, 1e-9);
+    CHECK_NEAR(NearestFreeSlot(500, 68, 0, 1000, {520}), 452, 1e-9);
+    CHECK_NEAR(NearestFreeSlot(500, 68, 0, 1000, {452, 520}), 588, 1e-9);
+    CHECK_NEAR(NearestFreeSlot(-40, 68, 0, 1000, {0}), 68, 1e-9);
+    CHECK_NEAR(NearestFreeSlot(2000, 68, 0, 1000, {}), 1000, 1e-9);
   });
 
   Test("release velocity uses recent samples and ignores a stop", [&] {

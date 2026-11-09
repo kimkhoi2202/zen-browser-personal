@@ -9,7 +9,6 @@
 // on the original <video> in the source tab (the player only shows a visual
 // clone that shares the original decoder).
 
-import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = {};
@@ -26,16 +25,27 @@ XPCOMUtils.defineLazyPreferenceGetter(
   true
 );
 XPCOMUtils.defineLazyPreferenceGetter(lazy, "EDGE_GAP", "zen.pip.edge-gap", 10);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "IDLE_HIDE_MS",
+  "zen.pip.controls.idle-hide-ms",
+  2400
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "TWO_FINGER_CARRY",
+  "zen.pip.motion.two-finger-carry",
+  true
+);
 
 const PLACEMENT_PREF = "zen.pip.last-placement";
 const TEXT_TRACK_FONT_SIZE_PREF =
   "media.videocontrols.picture-in-picture.display-text-tracks.size";
 const SEEK_SECONDS = 15;
 
-// macOS virtual key codes delivered by the native chrome.
+// macOS virtual key codes, as the native chrome reports them.
 const MAC_KEY = {
   RETURN: 36,
-  TAB: 48,
   SPACE: 49,
   ESCAPE: 53,
   ENTER: 76,
@@ -46,68 +56,95 @@ const MAC_KEY = {
   DOWN: 125,
   UP: 126,
 };
+// The same keys by DOM key code, for keys that reach the player document.
+const DOM_VK_TAB = 9;
+const MAC_KEY_BY_DOM_KEY = new Map([
+  [13, MAC_KEY.RETURN],
+  [27, MAC_KEY.ESCAPE],
+  [32, MAC_KEY.SPACE],
+  [35, MAC_KEY.END],
+  [36, MAC_KEY.HOME],
+  [37, MAC_KEY.LEFT],
+  [38, MAC_KEY.UP],
+  [39, MAC_KEY.RIGHT],
+  [40, MAC_KEY.DOWN],
+]);
+
+// Closes the user asked for fade the player out; going back to the tab
+// shrinks it into the video in its page.
+const FADE_OUT_REASONS = [
+  "CloseButton",
+  "ClosePlayerShortcut",
+  "Shortcut",
+  "ContextMenu",
+];
+const SHRINK_REASONS = ["Unpip", "Foregrounded"];
+// A transition never holds a close up for longer than this.
+const EXIT_TIMEOUT_MS = 600;
 
 function nativeService() {
-  try {
-    return (
-      Cc["@mozilla.org/zen/pip-native-player;1"]?.getService(
-        Ci.nsIZenPipNativePlayer
-      ) ?? null
-    );
-  } catch {
-    return null;
-  }
+  return (
+    Cc["@mozilla.org/zen/pip-native-player;1"]?.getService(
+      Ci.nsIZenPipNativePlayer
+    ) ?? null
+  );
 }
 
-function intPref(name, fallback) {
-  return Services.prefs.getIntPref(name, fallback);
+// A screen rect in device pixels to desktop pixels; all zero when unknown.
+function desktopRect(rect, desktopToDeviceScale) {
+  if (!rect || !(desktopToDeviceScale > 0)) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  return {
+    left: rect.left / desktopToDeviceScale,
+    top: rect.top / desktopToDeviceScale,
+    width: rect.width / desktopToDeviceScale,
+    height: rect.height / desktopToDeviceScale,
+  };
 }
 
 function configuration() {
   return {
     edgeGap: lazy.EDGE_GAP,
-    springResponse: intPref("zen.pip.motion.response-ms", 420) / 1000,
-    springDamping: intPref("zen.pip.motion.damping-percent", 86) / 100,
-    decelerationRate:
-      intPref("zen.pip.motion.deceleration-per-mille", 998) / 1000,
-    flickSpeed: intPref("zen.pip.motion.flick-speed", 320),
-    magnetDistance: intPref("zen.pip.motion.magnet-distance", 36),
-    idleHideDelay: intPref("zen.pip.controls.idle-hide-ms", 2400) / 1000,
-    carryWithTwoFingers: Services.prefs.getBoolPref(
-      "zen.pip.motion.two-finger-carry",
-      true
-    )
-      ? 1
-      : 0,
+    idleHideDelay: lazy.IDLE_HIDE_MS / 1000,
+    carryWithTwoFingers: lazy.TWO_FINGER_CARRY ? 1 : 0,
+    rightToLeft: Services.locale.isAppLocaleRTL ? 1 : 0,
   };
 }
 
 // Localized labels: stock Picture-in-Picture strings where they exist, Zen
-// strings for the additions.
+// strings for the additions (the stock tooltips need their $shortcut).
+// "timePosition" and "behindLive" come back as templates that the native side
+// fills in (%1$@, %2$@).
 const LABELS = [
   ["close", "pictureinpicture-close-btn", { shortcut: "⌘W" }],
   ["minimize", "pictureinpicture-minimize-btn"],
   ["play", "pictureinpicture-play-btn"],
   ["pause", "pictureinpicture-pause-btn"],
+  ["replay", "zen-pip-replay"],
   ["mute", "pictureinpicture-mute-btn", { shortcut: "M" }],
   ["unmute", "pictureinpicture-unmute-btn", { shortcut: "M" }],
   ["returnToTab", "pictureinpicture-unpip-btn"],
   ["speed", "pictureinpicture-playback-rate-btn"],
+  ["subtitlesMenu", "pictureinpicture-subtitles-label"],
   ["captionsSize", "pictureinpicture-font-size-label"],
   ["captionSize-small", "pictureinpicture-font-size-small"],
   ["captionSize-medium", "pictureinpicture-font-size-medium"],
   ["captionSize-large", "pictureinpicture-font-size-large"],
   ["back15", "zen-pip-back-15"],
   ["forward15", "zen-pip-forward-15"],
-  ["captionsOn", "zen-pip-captions-show"],
-  ["captionsOff", "zen-pip-captions-hide"],
-  ["captionsMenuShow", "zen-pip-captions-show"],
-  ["captionsUnavailable", "zen-pip-captions-unavailable"],
+  ["subtitlesOn", "zen-pip-subtitles-show"],
+  ["subtitlesOff", "zen-pip-subtitles-hide"],
+  ["subtitlesUnavailable", "zen-pip-subtitles-unavailable"],
   ["timeline", "zen-pip-timeline"],
-  ["timeOf", "zen-pip-time-of"],
+  [
+    "timePosition",
+    "zen-pip-time-position",
+    { elapsed: "%1$@", duration: "%2$@" },
+  ],
   ["live", "zen-pip-live"],
   ["goLive", "zen-pip-go-live"],
-  ["behindLive", "zen-pip-behind-live"],
+  ["behindLive", "zen-pip-behind-live", { duration: "%1$@" }],
   ["restore", "zen-pip-restore"],
 ];
 
@@ -117,11 +154,8 @@ async function localizedLabels(document) {
   );
   const strings = {};
   messages.forEach((message, index) => {
-    if (!message) {
-      return;
-    }
-    const attribute = message.attributes?.find(a => a.name == "aria-label");
-    const text = attribute?.value ?? message.value;
+    const attribute = message?.attributes?.find(a => a.name == "aria-label");
+    const text = attribute?.value ?? message?.value;
     if (text) {
       strings[LABELS[index][0]] = text;
     }
@@ -136,9 +170,14 @@ class ZenPipNativeSession {
   #controls = null;
   #player = null;
   #window = null;
+  #sourceWindow = null;
   #wasPlayingBeforeScrub = false;
   #captionsAvailable = false;
   #captionStyle = null;
+  #live = false;
+  #seekable = false;
+  #atLiveEdge = true;
+  #exit = null;
 
   constructor(window, player, controls) {
     this.#window = window;
@@ -154,6 +193,7 @@ class ZenPipNativeSession {
     );
   }
 
+  // For tests and diagnostics.
   get controls() {
     return this.#controls;
   }
@@ -173,28 +213,44 @@ class ZenPipNativeSession {
     this.#controls?.setMuted(muted);
   }
 
+  setVolume(volume) {
+    this.#controls?.setVolume(volume);
+  }
+
   setPlaybackRate(rate) {
     this.#controls?.setPlaybackRate(rate);
+  }
+
+  setPlaybackState({ buffering, ended, loaded }) {
+    this.#controls?.setPlaybackState(!!buffering, !!ended, loaded ?? -1);
   }
 
   setTimeline({ currentTime, duration, isLive, liveWindow }) {
     if (typeof currentTime != "number") {
       return;
     }
+    this.#live = !!isLive;
     if (isLive && liveWindow) {
       // A live stream that can be scrubbed: the timeline spans its seekable
       // window, and the Live button returns to the live edge.
+      this.#seekable = true;
+      this.#atLiveEdge = !!liveWindow.atLiveEdge;
       this.#controls?.setTimeline(
         currentTime - liveWindow.start,
         liveWindow.end - liveWindow.start,
         true,
         true
       );
-      this.#controls?.setLiveEdge(!!liveWindow.atLiveEdge);
+      this.#controls?.setLiveEdge(this.#atLiveEdge);
       return;
     }
-    const seekable = Number.isFinite(duration) && duration > 0 && !isLive;
-    this.#controls?.setTimeline(currentTime, duration, seekable, !!isLive);
+    this.#seekable = Number.isFinite(duration) && duration > 0 && !isLive;
+    this.#controls?.setTimeline(
+      currentTime,
+      duration,
+      this.#seekable,
+      this.#live
+    );
   }
 
   setCaptions(available, enabled) {
@@ -203,20 +259,68 @@ class ZenPipNativeSession {
   }
 
   setVideoSize(width, height) {
-    if (!this.#controls || !(width > 0) || !(height > 0)) {
-      return false;
+    if (width > 0 && height > 0) {
+      this.#controls?.setVideoSize(width, height);
     }
-    this.#controls.setVideoSize(width, height);
-    return true;
   }
 
   setSourceWindow(sourceWindow) {
-    this.#controls?.setSourceWindow(sourceWindow ?? null);
+    this.#sourceWindow = sourceWindow ?? null;
+    this.#controls?.setSourceWindow(this.#sourceWindow);
+  }
+
+  // Transitions.
+
+  /**
+   * The player grows out of the video in its page: `rect` in device pixels
+   * of the source window's display, or null to fade in.
+   */
+  playEntrance(rect, desktopToDeviceScale) {
+    const { left, top, width, height } = desktopRect(
+      rect,
+      desktopToDeviceScale
+    );
+    this.#controls?.playEntrance(left, top, width, height);
+  }
+
+  /**
+   * Called before the player closes for `reason` (a Glean close method):
+   * back to the tab it shrinks into the video, closed by the user it fades.
+   */
+  async beforeClose(reason) {
+    if (!this.#controls) {
+      return;
+    }
+    if (SHRINK_REASONS.includes(reason)) {
+      const rect = await this.#player.actor
+        .sendQuery("PictureInPicture:ZenVideoRect")
+        .catch(() => null);
+      await this.#playExit(rect, this.#sourceWindow?.desktopToDeviceScale);
+    } else if (FADE_OUT_REASONS.includes(reason)) {
+      await this.#playExit(null);
+    }
+  }
+
+  #playExit(rect, desktopToDeviceScale) {
+    if (!this.#exit) {
+      this.#exit = Promise.withResolvers();
+      const { left, top, width, height } = desktopRect(
+        rect,
+        desktopToDeviceScale
+      );
+      this.#controls?.playExit(left, top, width, height);
+      this.#window.setTimeout(this.#exit.resolve, EXIT_TIMEOUT_MS);
+    }
+    return this.#exit.promise;
   }
 
   // Intents from the native controls.
 
   onAction(action, value, detail) {
+    if (action == "exit-done") {
+      this.#exit?.resolve();
+      return;
+    }
     const player = this.#player;
     const actor = player.actor;
     if (!actor || this.#window.closed) {
@@ -243,17 +347,12 @@ class ZenPipNativeSession {
         }
         break;
       case "scrub":
-        actor.sendAsyncMessage("PictureInPicture:SetVideoTime", {
-          scrubberPosition: value,
-          wasPlaying: this.#wasPlayingBeforeScrub,
-        });
-        break;
       case "scrub-end":
         actor.sendAsyncMessage("PictureInPicture:SetVideoTime", {
           scrubberPosition: value,
           wasPlaying: this.#wasPlayingBeforeScrub,
         });
-        if (this.#wasPlayingBeforeScrub) {
+        if (action == "scrub-end" && this.#wasPlayingBeforeScrub) {
           actor.sendAsyncMessage("PictureInPicture:Play");
         }
         break;
@@ -279,28 +378,22 @@ class ZenPipNativeSession {
         lazy.PictureInPicture.focusTabAndClosePip(this.#window, actor);
         break;
       case "key":
-        this.#onKey(value, detail);
+        this.#onKey({ code: value, ...JSON.parse(detail) });
         break;
       case "controls":
-        this.#positionCaptions(value == 1, detail);
+        this.#positionCaptions(value == 1, JSON.parse(detail).timelineTop);
         break;
       case "caption-style":
         // The system caption style (Accessibility > Captions), on open and
         // whenever it changes; the player page renders captions with it.
-        try {
-          this.#captionStyle = JSON.parse(detail || "null");
-          actor.sendAsyncMessage(
-            "PictureInPicture:ZenCaptionStyle",
-            this.#captionStyle
-          );
-        } catch (e) {
-          console.error(e);
-        }
+        this.#captionStyle = JSON.parse(detail);
+        actor.sendAsyncMessage(
+          "PictureInPicture:ZenCaptionStyle",
+          this.#captionStyle
+        );
         break;
       case "placement":
-        if (detail) {
-          Services.prefs.setStringPref(PLACEMENT_PREF, detail);
-        }
+        Services.prefs.setStringPref(PLACEMENT_PREF, detail);
         break;
     }
   }
@@ -326,11 +419,7 @@ class ZenPipNativeSession {
     this.#controls?.setCaptionSize(size);
   }
 
-  #positionCaptions(showing, detail) {
-    let timelineTop = null;
-    try {
-      timelineTop = JSON.parse(detail || "{}").timelineTop ?? null;
-    } catch {}
+  #positionCaptions(showing, timelineTop) {
     this.#player.actor.sendAsyncMessage(
       showing
         ? "PictureInPicture:ShowVideoControls"
@@ -345,126 +434,125 @@ class ZenPipNativeSession {
     );
   }
 
+  // Speeds above normal can't do anything at a live stream's live edge.
+  #canSpeedUp() {
+    return (
+      !this.#live ||
+      (this.#seekable && !this.#atLiveEdge) ||
+      this.#player._playbackRate < 1
+    );
+  }
+
   /**
-   * Keyboard map (Yab's where it does not clash with Firefox's): Space
-   * play/pause, ←/→ ±15 s, ↑/↓ volume, M mute, C captions, < > speed,
-   * Return back to the tab (keeps playing), Esc pause and close, ⌘W close,
-   * Tab focuses the native controls.
+   * The player's keys (Yab's where they don't clash with Firefox's): Space
+   * play/pause, ←/→ ±15 s, ↑/↓ volume, M mute, C subtitles, < > speed, Return
+   * back to the tab (keeps playing), Esc pause and close, ⌘W close, ⌘⌥⇧P
+   * toggle Picture-in-Picture. Returns whether the key is one of them.
    */
-  #onKey(macKeyCode, detail) {
-    let key = {};
-    try {
-      key = JSON.parse(detail || "{}");
-    } catch {}
+  #onKey({ code, key = "", shift, alt, ctrl, meta }) {
     const player = this.#player;
-    const plain = !key.meta && !key.ctrl && !key.alt;
     const KeyEvent = this.#window.KeyEvent;
+    const plain = !meta && !ctrl && !alt;
     const sendKey = keyCode =>
       player.actor.sendAsyncMessage("PictureInPicture:KeyDown", {
-        altKey: !!key.alt,
-        shiftKey: !!key.shift,
-        metaKey: !!key.meta,
-        ctrlKey: !!key.ctrl,
+        altKey: !!alt,
+        shiftKey: !!shift,
+        metaKey: !!meta,
+        ctrlKey: !!ctrl,
         keyCode,
       });
-    const char = (key.key || "").toLowerCase();
+    // A live stream that can't be scrubbed has nowhere to seek to.
+    const canSeek = !this.#live || this.#seekable;
 
-    switch (macKeyCode) {
+    switch (code) {
       case MAC_KEY.SPACE:
         sendKey(KeyEvent.DOM_VK_SPACE);
-        return;
+        return true;
       case MAC_KEY.ESCAPE:
-        player.onClose(!!key.shift);
-        return;
+        player.onClose(!!shift);
+        return true;
       case MAC_KEY.RETURN:
       case MAC_KEY.ENTER:
         lazy.PictureInPicture.focusTabAndClosePip(this.#window, player.actor);
-        return;
+        return true;
       case MAC_KEY.LEFT:
       case MAC_KEY.RIGHT:
-        if (plain) {
+        if (canSeek && plain) {
           this.onAction(
             "seek-relative",
-            macKeyCode == MAC_KEY.LEFT ? -SEEK_SECONDS : SEEK_SECONDS,
+            code == MAC_KEY.LEFT ? -SEEK_SECONDS : SEEK_SECONDS,
             ""
           );
-        } else {
+        } else if (canSeek) {
           sendKey(
-            macKeyCode == MAC_KEY.LEFT
-              ? KeyEvent.DOM_VK_LEFT
-              : KeyEvent.DOM_VK_RIGHT
+            code == MAC_KEY.LEFT ? KeyEvent.DOM_VK_LEFT : KeyEvent.DOM_VK_RIGHT
           );
         }
-        return;
+        return true;
       case MAC_KEY.UP:
         sendKey(KeyEvent.DOM_VK_UP);
-        return;
+        return true;
       case MAC_KEY.DOWN:
         sendKey(KeyEvent.DOM_VK_DOWN);
-        return;
+        return true;
       case MAC_KEY.HOME:
-        sendKey(KeyEvent.DOM_VK_HOME);
-        return;
       case MAC_KEY.END:
-        sendKey(KeyEvent.DOM_VK_END);
-        return;
+        if (canSeek) {
+          sendKey(
+            code == MAC_KEY.HOME ? KeyEvent.DOM_VK_HOME : KeyEvent.DOM_VK_END
+          );
+        }
+        return true;
     }
 
-    if (key.meta && char == "w") {
+    const char = key.toLowerCase();
+    if (meta && char == "w") {
       sendKey(KeyEvent.DOM_VK_W);
-    } else if (key.meta && key.alt && key.shift && char == "p") {
+    } else if (meta && alt && shift && char == "p") {
       player.closePipWindow({ reason: "Shortcut" });
     } else if (plain && char == "m") {
       player.toggleMute();
     } else if (plain && char == "c") {
       this.#toggleCaptions();
-    } else if (!key.meta && (char == "<" || char == ",")) {
-      if (char == "<" || key.shift) {
-        player.cyclePlaybackRate(-1);
-      }
-    } else if (!key.meta && (char == ">" || char == ".")) {
-      if (char == ">" || key.shift) {
+    } else if (!meta && (key == "<" || (shift && key == ","))) {
+      player.cyclePlaybackRate(-1);
+    } else if (!meta && (key == ">" || (shift && key == "."))) {
+      if (this.#canSpeedUp()) {
         player.cyclePlaybackRate(1);
       }
+    } else {
+      return false;
     }
+    return true;
   }
 
   /**
-   * Keys that still reach the player document (when Gecko holds keyboard
-   * focus) take the same native-mode shortcuts. Returns true if handled.
+   * Keys that reach the player document (when Gecko holds keyboard focus)
+   * take the same shortcuts; the others go on to Gecko and the menu bar.
+   * Returns whether the key was handled.
    */
   handleKeyDown(event) {
-    if (event.keyCode == this.#window.KeyEvent.DOM_VK_TAB) {
+    let handled = true;
+    if (event.keyCode == DOM_VK_TAB) {
       this.#controls?.focusControls();
-      event.preventDefault();
-      return true;
-    }
-    const macCodes = {
-      [this.#window.KeyEvent.DOM_VK_SPACE]: MAC_KEY.SPACE,
-      [this.#window.KeyEvent.DOM_VK_ESCAPE]: MAC_KEY.ESCAPE,
-      [this.#window.KeyEvent.DOM_VK_RETURN]: MAC_KEY.RETURN,
-      [this.#window.KeyEvent.DOM_VK_LEFT]: MAC_KEY.LEFT,
-      [this.#window.KeyEvent.DOM_VK_RIGHT]: MAC_KEY.RIGHT,
-      [this.#window.KeyEvent.DOM_VK_UP]: MAC_KEY.UP,
-      [this.#window.KeyEvent.DOM_VK_DOWN]: MAC_KEY.DOWN,
-      [this.#window.KeyEvent.DOM_VK_HOME]: MAC_KEY.HOME,
-      [this.#window.KeyEvent.DOM_VK_END]: MAC_KEY.END,
-    };
-    this.#onKey(
-      macCodes[event.keyCode] ?? -1,
-      JSON.stringify({
+    } else {
+      handled = this.#onKey({
+        code: MAC_KEY_BY_DOM_KEY.get(event.keyCode) ?? -1,
         key: event.key,
         shift: event.shiftKey,
         alt: event.altKey,
         ctrl: event.ctrlKey,
         meta: event.metaKey,
-      })
-    );
-    event.preventDefault();
-    return true;
+      });
+    }
+    if (handled) {
+      event.preventDefault();
+    }
+    return handled;
   }
 
   destroy() {
+    this.#exit?.resolve();
     this.#controls?.destroy();
     this.#controls = null;
     this.#player = null;
@@ -472,17 +560,9 @@ class ZenPipNativeSession {
 }
 
 export const ZenPipNativeControls = {
-  /** Whether player windows get the native chrome. */
+  /** Whether player windows get the native chrome (registered on macOS). */
   get isEnabled() {
-    return (
-      AppConstants.platform == "macosx" &&
-      lazy.NATIVE_ENABLED &&
-      !!nativeService()?.isSupported
-    );
-  },
-
-  get hasLiquidGlass() {
-    return !!nativeService()?.hasLiquidGlass;
+    return lazy.NATIVE_ENABLED && !!nativeService();
   },
 
   /**
@@ -513,6 +593,7 @@ export const ZenPipNativeControls = {
         height: height / cssToDesktop,
       };
     } catch (e) {
+      // No display information: Firefox places the player itself.
       console.error(e);
       return null;
     }

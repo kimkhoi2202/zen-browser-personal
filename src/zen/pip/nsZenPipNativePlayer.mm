@@ -17,6 +17,7 @@
 #include "mozilla/WidgetUtils.h"
 #include "nsCOMPtr.h"
 #include "nsIWidget.h"
+#include "nsMenuBarX.h"
 #include "nsObjCExceptions.h"
 #include "nsPIDOMWindow.h"
 #include "nsString.h"
@@ -35,10 +36,20 @@ NSWindow* NativeWindowFor(mozIDOMWindowProxy* aWindow) {
   nsCOMPtr<nsPIDOMWindowOuter> outer = nsPIDOMWindowOuter::From(aWindow);
   RefPtr<nsIWidget> widget =
       mozilla::widget::WidgetUtils::DOMWindowToWidget(outer);
-  if (!widget) {
-    return nil;
+  return widget
+             ? static_cast<NSWindow*>(widget->GetNativeData(NS_NATIVE_WINDOW))
+             : nil;
+}
+
+// A rect in Gecko desktop pixels (y down from the top of the primary display)
+// in AppKit screen coordinates (y up from its bottom).
+NSRect FromDesktopRect(double aLeft, double aTop, double aWidth,
+                       double aHeight) {
+  if (!(aWidth > 0 && aHeight > 0)) {
+    return NSZeroRect;
   }
-  return static_cast<NSWindow*>(widget->GetNativeData(NS_NATIVE_WINDOW));
+  double primaryTop = NSMaxY(NSScreen.screens.firstObject.frame);
+  return NSMakeRect(aLeft, primaryTop - aTop - aHeight, aWidth, aHeight);
 }
 
 NSString* ToNSString(const nsACString& aString) {
@@ -51,14 +62,16 @@ NSDictionary* ParseJSONObject(const nsACString& aJSON) {
   if (aJSON.IsEmpty()) {
     return nil;
   }
-  NSData* data = [NSData dataWithBytes:aJSON.BeginReading() length:aJSON.Length()];
+  NSData* data = [NSData dataWithBytes:aJSON.BeginReading()
+                                length:aJSON.Length()];
   id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
   return [object isKindOfClass:[NSDictionary class]] ? object : nil;
 }
 
 double NumberOr(NSDictionary* aDict, NSString* aKey, double aFallback) {
   id value = aDict[aKey];
-  return [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : aFallback;
+  return [value isKindOfClass:[NSNumber class]] ? [value doubleValue]
+                                                : aFallback;
 }
 
 Dock DockFromName(NSString* aName) {
@@ -94,7 +107,8 @@ class nsZenPipNativeControls final : public nsIZenPipNativeControls,
   nsZenPipNativeControls(NSWindow* aWindow,
                          nsIZenPipNativeControlsListener* aListener)
       : mListener(aListener) {
-    mChrome = [[ZenPipPlayerChrome alloc] initWithPlayerWindow:aWindow host:this];
+    mChrome = [[ZenPipPlayerChrome alloc] initWithPlayerWindow:aWindow
+                                                          host:this];
   }
 
   bool IsAttached() const { return !!mChrome; }
@@ -109,13 +123,22 @@ class nsZenPipNativeControls final : public nsIZenPipNativeControls,
     NS_DispatchToCurrentThread(NS_NewRunnableFunction(
         "zen::nsZenPipNativeControls::OnChromeAction",
         [self = RefPtr{this}, action, aValue, detail, closing] {
-          if (nsCOMPtr<nsIZenPipNativeControlsListener> listener = self->mListener) {
+          if (nsCOMPtr<nsIZenPipNativeControlsListener> listener =
+                  self->mListener) {
             listener->OnAction(action, aValue, detail);
           }
           if (closing) {
             self->Destroy();
           }
         }));
+  }
+
+  // The menu bar shown runs the shortcut's item. GeckoNSMenu's own
+  // performKeyEquivalent: leaves keys from Gecko windows to the window.
+  bool PerformMenuKeyEquivalent(NSEvent* aEvent) override {
+    NSMenu* menu = NSApp.mainMenu;
+    return [menu isKindOfClass:[GeckoNSMenu class]] &&
+           [(GeckoNSMenu*)menu performSuperKeyEquivalent:aEvent];
   }
 
  private:
@@ -136,6 +159,20 @@ nsZenPipNativeControls::SetPlaying(bool aPlaying) {
 NS_IMETHODIMP
 nsZenPipNativeControls::SetMuted(bool aMuted) {
   [mChrome setMuted:aMuted];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsZenPipNativeControls::SetVolume(double aVolume) {
+  [mChrome setVolume:aVolume];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsZenPipNativeControls::SetPlaybackState(bool aBuffering, bool aEnded,
+                                         double aLoaded) {
+  [mChrome setBuffering:aBuffering ended:aEnded];
+  [mChrome setLoadedFraction:aLoaded];
   return NS_OK;
 }
 
@@ -179,14 +216,7 @@ nsZenPipNativeControls::SetStrings(const nsACString& aStringsJSON) {
   if (!strings) {
     return NS_ERROR_INVALID_ARG;
   }
-  NSMutableDictionary<NSString*, NSString*>* clean = [NSMutableDictionary dictionary];
-  for (id key in strings) {
-    id value = strings[key];
-    if ([key isKindOfClass:[NSString class]] && [value isKindOfClass:[NSString class]]) {
-      clean[key] = value;
-    }
-  }
-  [mChrome setStrings:clean];
+  [mChrome setStrings:strings];
   return NS_OK;
 }
 
@@ -209,6 +239,20 @@ nsZenPipNativeControls::SetConfiguration(const nsACString& aConfigJSON) {
     return NS_ERROR_INVALID_ARG;
   }
   [mChrome setConfiguration:config];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsZenPipNativeControls::PlayEntrance(double aLeft, double aTop, double aWidth,
+                                     double aHeight) {
+  [mChrome playEntranceFrom:FromDesktopRect(aLeft, aTop, aWidth, aHeight)];
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsZenPipNativeControls::PlayExit(double aLeft, double aTop, double aWidth,
+                                 double aHeight) {
+  [mChrome playExitTo:FromDesktopRect(aLeft, aTop, aWidth, aHeight)];
   return NS_OK;
 }
 
@@ -277,7 +321,8 @@ nsZenPipNativeControls::TestClick(const nsACString& aControl, bool* aClicked) {
 }
 
 NS_IMETHODIMP
-nsZenPipNativeControls::TestKey(uint16_t aKeyCode, const nsACString& aCharacters,
+nsZenPipNativeControls::TestKey(uint16_t aKeyCode,
+                                const nsACString& aCharacters,
                                 uint32_t aModifiers) {
   [mChrome testKey:aKeyCode
         characters:ToNSString(aCharacters)
@@ -364,8 +409,8 @@ nsZenPipNativePlayer::InitialFrame(mozIDOMWindowProxy* aSourceWindow,
   NSDictionary* saved = ParseJSONObject(aPlacementJSON);
   Placement placement;
   placement.dock = DockFromName(saved[@"dock"]);
-  placement.fx = std::clamp(NumberOr(saved, @"fx", 1), 0.0, 1.0);
-  placement.fy = std::clamp(NumberOr(saved, @"fy", 0), 0.0, 1.0);
+  placement.fx = NumberOr(saved, @"fx", 1);
+  placement.fy = NumberOr(saved, @"fy", 0);
   // A third of the display width by default, like the stock player.
   double width = NumberOr(saved, @"width", area.width / 3);
   Vec2 size = ClampSize(width, aspect, area, SizeLimits{});

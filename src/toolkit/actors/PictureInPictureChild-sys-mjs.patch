@@ -1,5 +1,5 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cbc4a105e3 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f75745287 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
 @@ -19,7 +19,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
@@ -16,7 +16,52 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
  import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  
  XPCOMUtils.defineLazyPreferenceGetter(
-@@ -285,6 +290,15 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -157,6 +162,44 @@ function applyWrapper(pipChild, originatingVideo) {
+  * @param {string} documentURI
+  * @returns { object | null }
+  */
++// Zen: media events that can change the native player's spinner, replay
++// button or loaded range.
++const ZEN_PLAYBACK_STATE_EVENTS = [
++  "waiting",
++  "canplay",
++  "seeking",
++  "seeked",
++  "ended",
++  "progress",
++];
++
++/**
++ * Zen: where the visible part of a video is on screen, in device pixels, or
++ * null while its page isn't showing. The native player grows out of it when
++ * it opens and shrinks back into it when the user returns to the tab.
++ */
++function zenVideoScreenRect(video) {
++  let win = video?.documentGlobal;
++  if (!win || win.document.hidden) {
++    return null;
++  }
++  let rect = video.getBoundingClientRect();
++  let left = Math.max(rect.left, 0);
++  let top = Math.max(rect.top, 0);
++  let right = Math.min(rect.right, win.innerWidth);
++  let bottom = Math.min(rect.bottom, win.innerHeight);
++  if (right - left < 1 || bottom - top < 1) {
++    return null;
++  }
++  let scale = win.devicePixelRatio;
++  return {
++    left: (win.mozInnerScreenX + left) * scale,
++    top: (win.mozInnerScreenY + top) * scale,
++    width: (right - left) * scale,
++    height: (bottom - top) * scale,
++  };
++}
++
+ function getSiteOverrideForDocument(documentURI) {
+   // gSiteOverrides is a list of tuples where the first element is the MatchPattern
+   // for a supported site and the second is the actual overrides object for it.
+@@ -285,6 +328,16 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        volume: PictureInPictureChild.videoWrapper.getVolume(video),
        playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
        autoFocus,
@@ -29,10 +74,11 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
 +      duration: PictureInPictureChild.videoWrapper.getDuration(video),
 +      isLive: PictureInPictureChild.videoWrapper.isLive(video),
 +      liveWindow: PictureInPictureChild.videoWrapper.getLiveWindow(video),
++      zenVideoRect: reason == "AutoPip" ? null : zenVideoScreenRect(video),
      });
  
      // Some tests don't bother setting a reason.
-@@ -346,6 +360,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+@@ -346,6 +399,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        if (
          video &&
          PictureInPictureChild.videoIsPlaying(video) &&
@@ -40,7 +86,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
          PictureInPictureChild.videoIsPiPEligible(video)
        ) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
-@@ -1847,8 +1862,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -1847,8 +1901,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
      const textTracksFontScale = this.document
        .querySelector(":root")
        .style.getPropertyValue("--font-scale");
@@ -54,7 +100,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
        textTracks.removeAttribute("overlap-video-controls");
        return;
      }
-@@ -1866,6 +1885,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -1866,6 +1924,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
          } else {
            root.style.setProperty("--player-controls-scrubber-height", "0px");
          }
@@ -67,20 +113,30 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
          textTracks.setAttribute("overlap-video-controls", true);
        } else {
          textTracks.removeAttribute("overlap-video-controls");
-@@ -2086,10 +2111,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2086,10 +2150,22 @@ export class PictureInPictureChild extends JSWindowActorChild {
        // Intentional fall-through
        case "play": {
          this.sendAsyncMessage("PictureInPicture:Playing");
 +        this.zenWatchPausedLive(false);
++        this.zenSendPlaybackState();
          break;
        }
        case "pause": {
          this.sendAsyncMessage("PictureInPicture:Paused");
 +        this.zenWatchPausedLive(true);
++        this.zenSendPlaybackState();
++        break;
++      }
++      case "waiting":
++      case "canplay":
++      case "seeking":
++      case "seeked":
++      case "ended": {
++        this.zenSendPlaybackState();
          break;
        }
        case "volumechange": {
-@@ -2181,8 +2208,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2181,8 +2257,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
              {
                scrubberPosition,
                timestamp,
@@ -98,7 +154,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
          }
          break;
        }
-@@ -2291,12 +2327,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2291,12 +2376,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
          let selectedTime;
          let video = this.getWeakVideo();
          let currentTime = this.videoWrapper.getCurrentTime(video);
@@ -116,7 +172,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
            selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
          }
          this.videoWrapper.setCurrentTime(video, selectedTime);
-@@ -2326,6 +2365,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2326,6 +2414,20 @@ export class PictureInPictureChild extends JSWindowActorChild {
          this.toggleTextTracks();
          break;
        }
@@ -131,10 +187,13 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
 +        }
 +        break;
 +      }
++      case "PictureInPicture:ZenVideoRect": {
++        return zenVideoScreenRect(this.getWeakVideo());
++      }
        case "PictureInPicture:ChangeFontSizeTextTracks": {
          this.setTextTrackFontSize();
          break;
-@@ -2360,9 +2410,48 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2360,9 +2462,49 @@ export class PictureInPictureChild extends JSWindowActorChild {
      const video = this.getWeakVideo();
      let duration = this.videoWrapper.getDuration(video);
      let currentTime = scrubberPosition * duration;
@@ -143,7 +202,8 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
 +      this.videoWrapper.isLive(video) && this.videoWrapper.getLiveWindow(video);
 +    if (liveWindow) {
 +      currentTime =
-+        liveWindow.start + scrubberPosition * (liveWindow.end - liveWindow.start);
++        liveWindow.start +
++        scrubberPosition * (liveWindow.end - liveWindow.start);
 +    }
      this.videoWrapper.setCurrentTime(video, currentTime, wasPlaying);
    }
@@ -183,7 +243,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
    /**
     * @returns {boolean} true if a textTrack with mode "hidden" should be treated as "showing"
     */
-@@ -2409,6 +2498,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2409,6 +2551,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
     * Set the font size on the PiP window using the current font size value from
     * the "media.videocontrols.picture-in-picture.display-text-tracks.size" pref
     */
@@ -224,16 +284,29 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
    setTextTrackFontSize() {
      const fontSize = Services.prefs.getStringPref(
        TEXT_TRACK_FONT_SIZE,
-@@ -2505,6 +2628,8 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2449,6 +2625,9 @@ export class PictureInPictureChild extends JSWindowActorChild {
+       originatingVideo.addEventListener("resize", this);
+       originatingVideo.addEventListener("emptied", this);
+       originatingVideo.addEventListener("timeupdate", this);
++      for (let type of ZEN_PLAYBACK_STATE_EVENTS) {
++        originatingVideo.addEventListener(type, this);
++      }
+ 
+       if (lazy.DISPLAY_TEXT_TRACKS_PREF) {
+         this.setupTextTracks(originatingVideo);
+@@ -2505,6 +2684,11 @@ export class PictureInPictureChild extends JSWindowActorChild {
        originatingVideo.removeEventListener("resize", this);
        originatingVideo.removeEventListener("emptied", this);
        originatingVideo.removeEventListener("timeupdate", this);
++      for (let type of ZEN_PLAYBACK_STATE_EVENTS) {
++        originatingVideo.removeEventListener(type, this);
++      }
 +      clearInterval(this.zenPausedLiveInterval);
 +      this.zenPausedLiveInterval = null;
  
        if (lazy.DISPLAY_TEXT_TRACKS_PREF) {
          this.removeTextTracks(originatingVideo);
-@@ -2652,6 +2777,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2652,6 +2836,62 @@ export class PictureInPictureChild extends JSWindowActorChild {
        },
        { once: true }
      );
@@ -248,10 +321,55 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..3499c80724ba11eb54a821ba6a1514cb
 +        : "PictureInPicture:Paused"
 +    );
 +    this.zenWatchPausedLive(originatingVideo.paused);
++    this.zenSendPlaybackState();
++  }
++
++  /**
++   * Zen: whether the video waits for data while playing, whether it ended
++   * and how much of it has loaded ahead of the position (in 1% steps, -1 when
++   * unknown), for the native player's spinner, replay button and timeline.
++   * Sent when any of them changes.
++   */
++  zenSendPlaybackState() {
++    let video = this.getWeakVideo();
++    if (!video) {
++      return;
++    }
++    let loaded = -1;
++    if (Number.isFinite(video.duration) && video.duration > 0) {
++      let { buffered, currentTime } = video;
++      for (let i = 0; i < buffered.length; i++) {
++        if (
++          buffered.start(i) <= currentTime + 0.5 &&
++          buffered.end(i) >= currentTime
++        ) {
++          loaded = Math.round((buffered.end(i) / video.duration) * 100) / 100;
++          break;
++        }
++      }
++    }
++    let state = {
++      buffering:
++        !video.paused &&
++        !video.ended &&
++        video.readyState < video.HAVE_FUTURE_DATA,
++      ended: video.ended,
++      loaded,
++    };
++    let last = this.zenPlaybackState;
++    if (
++      last?.buffering == state.buffering &&
++      last?.ended == state.ended &&
++      last?.loaded == state.loaded
++    ) {
++      return;
++    }
++    this.zenPlaybackState = state;
++    this.sendAsyncMessage("PictureInPicture:ZenPlaybackState", state);
    }
  
    #onResizeNotifyPictureInPictureWindowInstance() {
-@@ -3555,6 +3691,67 @@ class PictureInPictureChildVideoWrapper {
+@@ -3555,6 +3795,67 @@ class PictureInPictureChildVideoWrapper {
        validateRetVal: retVal => this.#isBoolean(retVal),
      });
    }

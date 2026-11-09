@@ -11,8 +11,8 @@ namespace zen {
 
 /**
  * @brief Service that attaches the native (AppKit Liquid Glass) chrome to
- * Picture-in-Picture player windows. macOS only; elsewhere `isSupported` is
- * false and attach() fails, leaving the stock HTML controls in place.
+ * Picture-in-Picture player windows. Registered on macOS only; elsewhere the
+ * player keeps its stock HTML controls.
  */
 class nsZenPipNativePlayer final : public nsIZenPipNativePlayer {
  public:
