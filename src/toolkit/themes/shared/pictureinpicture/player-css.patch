@@ -1,8 +1,8 @@
 diff --git a/toolkit/themes/shared/pictureinpicture/player.css b/toolkit/themes/shared/pictureinpicture/player.css
-index 72b016f9626370a3c51a0850d47fb28d9bb4c80c..b05b20931762637168c087b3068fff81b2a2cd7b 100644
+index 72b016f9626370a3c51a0850d47fb28d9bb4c80c..e4eacb5a01a069103c940d5ccb55382f77b8619d 100644
 --- a/toolkit/themes/shared/pictureinpicture/player.css
 +++ b/toolkit/themes/shared/pictureinpicture/player.css
-@@ -845,3 +845,23 @@ input:checked + .slider::before {
+@@ -845,3 +845,35 @@ input:checked + .slider::before {
      justify-self: center;
    }
  }
@@ -22,7 +22,19 @@ index 72b016f9626370a3c51a0850d47fb28d9bb4c80c..b05b20931762637168c087b3068fff81
 +}
 +
 +/* Zen: the native macOS chrome (Liquid Glass controls) replaces the HTML
-+ * controls; they stay in the DOM because the player logic still uses them. */
-+:root[zen-native-controls] #controls {
-+  display: none !important;
++ * controls. */
++:root[zen-native-controls] {
++  /* Its corners are rounder than the system window's, so the window must be
++   * transparent around them. Gecko makes the window opaque white while the
++   * root paints a solid background, so the black is painted below it. */
++  background-color: transparent;
++
++  .player-holder {
++    background-color: var(--player-bg-color);
++  }
++
++  /* The HTML controls stay in the DOM because the player logic uses them. */
++  #controls {
++    display: none !important;
++  }
 +}
