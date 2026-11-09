@@ -80,6 +80,39 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.21 (candidate, not installed yet)
+
+personal.21 = a new full-source engine from `3f73fd0d` (round 8 of the
+independent project: stuck black players fixed, stash into the screen edge,
+entrance and exit transitions, click-only keyboard focus, menu-bar
+shortcuts, the new control states; built by `build_engine.sh`
+prepare/optimized/locales/package reusing the October 31 PGO profile:
+optimized stage 17.5 min), packaged from the same commit.
+
+- Source checks: the PiP's 393 geometry checks; native harness layout 153,
+  keys 4, clicks 63, motion 39. Preview browser suite 91/93 plus reruns
+  11/11 (misses: the test video had ended in the long run; YouTube's DVR
+  test stream served an ad).
+- Browser checks on the Dev candidate (throwaway profile): corners 9/9 on a
+  clean run; minimize, return to tab and the round 8 group 11/11 (no player
+  left after closing a playing tab three times, ⌘, opens Settings from the
+  player, a drag doesn't take the keyboard, stays on screen when Zen is
+  hidden, volume and Replay). Earlier candidate runs while the owner was
+  using the Mac saw the test player toggled, closed or carried to the other
+  display by input reaching it (a click now makes the player key); every
+  frame the resize logic produced was correct.
+- Frontend comparison with the installed personal.20: browser/omni.ja
+  differs in `firefox.js` (motion prefs removed), `zen-general.ftl` and
+  `ZenPipNativeControls.sys.mjs`; toolkit omni.ja in the three PiP modules,
+  build metadata and the locales' `coverage.json`. Nothing else changed.
+- Production candidate `dist/yab-pip-personal.21-production` (kept as
+  `Zen.app.disabled`, unregistered from Launch Services): signed by
+  fingerprint with the installed app's certificate; notarization
+  4d6be68f-67b6-4fb9-afb7-b3db4dbe115f Accepted (no issues), stapled,
+  Gatekeeper accepted. The personal.20 candidate and rollback copies had
+  been re-registered again and were unregistered; only `/Applications/Zen.app`
+  holds `com.kimkhoi.zen`.
+
 ## Verification and installation — personal.20
 
 personal.20 = a new full-source engine from `69d41d7b` (the chrome resizes
