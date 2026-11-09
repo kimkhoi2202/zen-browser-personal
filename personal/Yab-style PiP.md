@@ -81,7 +81,7 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## Verification — personal.22 (candidate, not installed yet)
+## Verification and installation — personal.22
 
 personal.22 = a new full-source engine from `8a2adb28` (round 9 of the
 independent project: the PiP window stays transparent around its rounded
@@ -108,6 +108,13 @@ PGO profile: optimized stage 16.4 min), packaged from the same commit.
   fingerprint with the installed app's certificate; notarization
   053c5726-f961-427f-9799-9989b181806f Accepted (no issues), stapled,
   Gatekeeper accepted. Only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+- Installed 2026-11-09 02:50 with the owner's approval after they quit Zen:
+  13,239 profile fingerprints unchanged; installed bytes match the
+  candidate; signature, staple and Gatekeeper verified in place; SourceStamp
+  `8a2adb28`. http/https still open `com.kimkhoi.zen`, the only registered
+  copy (the candidate had been re-registered by the install checks and was
+  unregistered). Rollback: `Previous Zen.app.disabled` (personal.21) and the
+  profile copy in `Backups/Yab Style PiP 2026-11-09 02-50-09`.
 
 ## Verification and installation — personal.21
 
