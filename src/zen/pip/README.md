@@ -46,7 +46,7 @@ Patches to upstream files (in `src/`):
   YouTube's live window and live edge from its own player.
 - `toolkit/themes/shared/pictureinpicture/texttracks-css.patch` – caption box
   styled from the system caption style (only when it has been applied).
-- `toolkit/themes/.../player-css.patch` – hides the HTML controls in native mode.
+- `toolkit/themes/.../player-css.patch` – hides the HTML controls in native mode and keeps the window transparent around its corners.
 - `widget/cocoa/nsCocoaWindow-mm.patch` – `mainChildView` finds Gecko's
   `ChildView` instead of assuming it is the last content subview (the overlay
   sits above it).
@@ -65,7 +65,10 @@ the untinted **Regular** variant. The Liquid Glass look setting (System
 Settings > Appearance) changes Regular glass such as the tab; Clear glass has
 no adaptive behaviors and looks the same at any setting. The player's corner
 radius follows the controls in its corners (their radius plus their inset),
-so they are concentric with it.
+so they are concentric with it. That is rounder than the system window, so
+the window is transparent around the corners; the player page keeps its root
+transparent (black is painted below it) because Gecko turns a window opaque
+white whenever the page's root paints a solid background.
 
 Layout: playback options on the left — speed, captions, sound — and window
 controls on the right — back to tab, minimize, close (in the corner);

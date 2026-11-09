@@ -2010,7 +2010,9 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 // Rounds the player's corners with `aRadius` (instead of the system's
 // smaller window radius), so that the glass controls in them are concentric
-// with the corners.
+// with the corners. The window must be transparent around them; in the
+// browser the player's stylesheet keeps it so, as Gecko re-derives that from
+// the page.
 - (void)applyCornerRadius:(CGFloat)aRadius {
   NSWindow* window = mWindow;
   NSView* content = window.contentView;
@@ -3548,6 +3550,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
     @"windowMovableBySystem" : @(window.movable),
     @"windowHidesWithApp" : @(window.canHide),
     @"cornerRadius" : @(window.contentView.layer.cornerRadius),
+    @"windowOpaque" : @(window.isOpaque),
     @"sourceWindowFrame" : source ? rect(source.frame) : @[],
     @"sourceScreen" : screen ? screen.localizedName : @"",
     @"sourceScreenFrame" : screen ? rect(screen.frame) : @[],
