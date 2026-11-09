@@ -26,15 +26,21 @@ video. Automatic pop-out uses Firefox's tab-switch PiP
 Patches to upstream files (in `src/`):
 
 - `toolkit/.../content/player-js.patch` – attaches the session, mirrors state,
-  routes keys, disables emulated fullscreen in native mode.
+  routes keys, disables emulated fullscreen in native mode, and closes a
+  player window that never got set up.
 - `toolkit/.../PictureInPicture-sys-mjs.patch` – initial frame on the source
-  window's display, numeric timeline, source-window tracking, and auto-PiP
-  fixes (drop requests the user already came back from, close a player that
-  finished opening after the user returned, one automatic player at a time).
+  window's display, numeric timeline, source-window tracking, the native
+  player's entrance and exit, and fixes: no player for a tab that closed or
+  moved while the player opened (it stayed black with dead controls and
+  couldn't be closed), a player closes when its video's page goes away
+  without asking, auto-PiP drops requests the user already came back from
+  and keeps one automatic player at a time, and Back to tab waits for a Space
+  switch already under way.
 - `toolkit/actors/PictureInPictureChild-sys-mjs.patch` – seek amount parameter
   and numeric time/duration/live alongside the formatted timestamp; live
   streams' seekable window, its timeline updates and Go to live (see Live
-  streams); applies the system caption style and places captions just above
+  streams); the video's place on screen and its buffering, ended and loaded
+  state; applies the system caption style and places captions just above
   the native timeline.
 - `browser/extensions/pictureinpicture/video-wrappers/youtube-js.patch` –
   YouTube's live window and live edge from its own player.
@@ -54,52 +60,83 @@ dimming layer** that fades in with the controls, carrying bold white SF
 Symbols. The system applies Reduce Transparency (frostier) and Increase
 Contrast (black/white with a border) to the material itself, so the chrome
 does not switch variants; only the symbol weight follows Increase Contrast.
-The minimized pill sits over arbitrary desktop content, not video, so it uses
+The stash tab sits over arbitrary desktop content, not video, so it uses
 the untinted **Regular** variant. The Liquid Glass look setting (System
-Settings > Appearance) changes Regular glass such as the pill; Clear glass has
-no adaptive behaviors and looks the same at any setting (measured in
-`Evidence/Experiments` of the preview project).
+Settings > Appearance) changes Regular glass such as the tab; Clear glass has
+no adaptive behaviors and looks the same at any setting. The player's corner
+radius follows the controls in its corners (their radius plus their inset),
+so they are concentric with it.
 
 Layout: playback options on the left — speed, captions, sound — and window
-controls on the right — back to tab, minimize, close (in the corner). Creation
-order (which VoiceOver follows) and the Tab order match that reading order.
+controls on the right — back to tab, minimize, close (in the corner);
+right-to-left languages mirror that row, while the timeline and the transport
+row keep their direction. Creation order (which VoiceOver follows) and the
+Tab order match the reading order.
 Tab moves through that list itself (`-keyboardOrder`): since macOS 26 AppKit
 inserts the controls' own subviews (button images, the slider's hosted
 SwiftUI view) into the key-view loop, so `nextKeyView` alone no longer
 reaches every control. A live stream's Live badge sits at the bottom left
 (see Live streams).
 
-The speed button is a round glass button like the others: an SF Symbols
-gauge whose needle shows the speed (up at 1×, leaning left when slower and
-right when faster; a plain `speedometer` before macOS 13). It drops down a
-native menu headed "Playback speed" with 0.5× to 2× and the current speed
-checked, including a speed the site chose itself (such as 1.1×). VoiceOver
-reads the speed as the button's value.
+The speed button shows the speed itself ("1×", "1.5×"), a circle that grows
+into a capsule for longer numbers. It drops down a native menu headed
+"Playback speed" with 0.5× to 2× and the current speed checked, including a
+speed the site chose itself (such as 1.1×). VoiceOver reads the speed as the
+button's value. The play button shows a spinner once the video has waited
+for data for 0.4 s, and a replay symbol at the end; the sound button's waves
+fill with the volume. The timeline is a thin track, white up to the position
+and lighter up to what has loaded, with its knob only while the pointer is on
+it, it is dragged or it has keyboard focus.
 
-Resizing: the chrome resizes the player from its whole border itself, the
-9 pt bands along the edges and the 18 pt squares at the corners (also just
-outside the window), keeping a docked corner or edge and the aspect ratio. A
-local event monitor takes every press there before AppKit sees it, together
-with its drags and its release, so a press resizes the same way however many
-clicks came before it: double-click and drag resizes like a single press, a
-double-click alone changes nothing. AppKit would resize from its own areas
-(about 7 pt in near the corners, 13 pt along a corner's diagonal, 3 pt at the
-middle of an edge on macOS 27) with its own anchoring, and grows the window
-toward the screen corner whenever two presses land on a corner within the
-double-click interval: it times them itself and ignores the click count.
-Controls drawn on the border (small players bring the top row and timeline
-within it) still get their presses; the empty corners of their squares
-resize. In the active app a border press makes the player the key window,
-as a press on the video does; a Command-press, or one from another app,
-leaves the key window alone. A double-click on the video toggles playback.
+Input: a local event monitor takes every left press in the player outside the
+buttons and the slider before AppKit sees it, together with its drags and its
+release. Presses on the 9 pt bands along the edges and the 18 pt squares at
+the corners (also just outside the window) resize, keeping a docked corner or
+edge and the aspect ratio, however many clicks came before them; the rest
+drag or throw. AppKit would make the player the key window on every press
+(so a drag from another app would take the keyboard), resize from its own
+areas with its own anchoring, and grow the window toward the screen corner
+whenever two presses land on a corner within the double-click interval. Only
+a click, a press released without moving, takes the keyboard (not with
+Command held). A double-click on the video toggles playback. Controls drawn
+on the border (small players bring the top row and timeline within it) still
+get their presses; the empty corners of their squares resize.
+
+Keys: Space, ←/→ ±15 s, ↑/↓ volume, M, C, < >, Return (back to the tab), Esc
+(close; Shift-Esc keeps playing), ⌘W, ⌘⌥⇧P, and ⌘M stashes the player. Other
+Command shortcuts (⌘Q, ⌘H, ⌘,) run the menu bar's items, as in any Zen
+window. The player stays on screen when Zen is hidden.
+
+## Motion
+
+The controls appear in 150 ms (ease-out) and leave in 150 ms when the pointer
+leaves (ease-in), 250 ms after a while without activity. A new player grows
+out of the video in its page (a fade for automatic Picture-in-Picture);
+back to the tab it shrinks into the video again, and closing it fades it out.
+A drag that reaches the edge of the display gives a trackpad tick.
+
+Minimize stashes the player into the nearer side of its display, the way
+macOS stashes its own Picture-in-Picture: it slides off the screen and leaves
+a glass tab at the edge. Pushing the player far past a side while dragging
+(40% of its width) and letting go stashes it too, with a second tick when it
+gets that far. A click on the tab, Space or Return once the tab has keyboard
+focus (window cycling reaches it) or VoiceOver brings it back; dragging the
+tab moves it along the edge. It never stashes into a side with another display
+beyond it, and Reduce Motion turns the slides into fades.
+
+Several players keep out of each other's way: a throw avoids corners another
+player takes, a new player opened over another moves to a free corner, and
+stash tabs stack along the edge.
 
 ## Live streams
 
 A live stream shows a glass **Live** badge with a dot at the bottom left,
-following YouTube's own live indicator.
+following YouTube's own live indicator: a filled red dot at the live edge and
+a grey ring behind it, so the two differ by shape as well as color. Speeds
+above 1× are off at the live edge.
 
-- A stream that can't be scrubbed (no DVR window, such as Claude FM on
-  YouTube) shows only the badge: a red dot, no timeline and no skip buttons.
+- A stream that can't be scrubbed (no DVR window) shows only the badge: a
+  red dot, no timeline, no skip or speed buttons, and ←/→ do nothing.
   The badge is status, not a control: it ignores clicks, takes no keyboard
   focus, has non-interactive glass and reads as static text "Live" in
   VoiceOver.
@@ -147,13 +184,14 @@ therefore stay on the current display. The new display becomes its home: it
 stays there while the source window moves, until it is dragged back (then it
 follows the source window again). If the home display disconnects it falls
 back to the source window's display, and returns when the display comes
-back.
+back. When the usable area changes (the Dock or menu bar shown, hidden or
+moved), the player goes back to the edges it rests against; window managers
+and the Zoom command can't move it out of its area.
 
 ## Preferences
 
 `zen.pip.native-controls.enabled` (off = stock HTML controls), `zen.pip.edge-gap`,
-`zen.pip.motion.*` (spring response/damping, throw deceleration, flick speed,
-magnet distance, two-finger carry), `zen.pip.controls.idle-hide-ms`,
+`zen.pip.motion.two-finger-carry`, `zen.pip.controls.idle-hide-ms`,
 `zen.pip.last-placement`.
 
 ## Older macOS

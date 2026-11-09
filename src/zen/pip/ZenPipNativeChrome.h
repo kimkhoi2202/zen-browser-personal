@@ -31,17 +31,22 @@ namespace zen::pip {
 //   "scrub-start" / "scrub" / "scrub-end"   value: position in [0, 1]
 //   "set-rate"         value: playback rate
 //   "caption-size"     detail: "small" | "medium" | "large"
+//   "caption-style"    detail: JSON system caption style, as CSS values
 //   "key"              value: macOS virtual key code,
 //                      detail: JSON {key, shift, alt, ctrl, meta}
 //   "controls"         value: 1 when shown, 0 when hidden,
 //                      detail: JSON {timelineTop} (CSS px from the top)
 //   "placement"        detail: JSON {dock, fx, fy, width, height}
-//   "tucked"           value: 1 when minimized to the edge, 0 when restored
+//   "exit-done"        the transition started by -playExitTo: has finished
 //   "window-will-close"
 class ChromeHost {
  public:
   virtual void OnChromeAction(const char* aAction, double aValue,
                               const char* aDetail) = 0;
+  // Offers a Command-key press the player has no use for (⌘Q, ⌘H, ⌘,) to
+  // the application menu, as Gecko does for keys its windows leave
+  // unhandled. Returns whether a menu item took it.
+  virtual bool PerformMenuKeyEquivalent(NSEvent* aEvent) = 0;
 
  protected:
   virtual ~ChromeHost() = default;
@@ -62,7 +67,15 @@ class ChromeHost {
 
 - (void)setPlaying:(BOOL)aPlaying;
 - (void)setMuted:(BOOL)aMuted;
+// The video's volume, 0 to 1, shown in the sound button's symbol.
+- (void)setVolume:(double)aVolume;
 - (void)setPlaybackRate:(double)aRate;
+// Waiting for data while playing (a spinner shows once it lasts), and
+// whether playback reached the end (the play button offers a replay).
+- (void)setBuffering:(BOOL)aBuffering ended:(BOOL)aEnded;
+// How much of the video has loaded, from 0 to 1 (negative when unknown),
+// drawn lighter along the timeline.
+- (void)setLoadedFraction:(double)aFraction;
 // A live stream (`aLive`) that can be scrubbed passes `aSeekable` with its
 // seekable window: `aCurrentTime` and `aDuration` are then relative to the
 // window start. One that can't be scrubbed shows only a Live status badge.
@@ -71,24 +84,33 @@ class ChromeHost {
               seekable:(BOOL)aSeekable
                   live:(BOOL)aLive;
 // For a live stream that can be scrubbed: whether playback is at the live
-// edge (the Live dot is red; grey when behind, as in YouTube's player).
+// edge (a filled red dot; a grey ring when behind, as in YouTube's player).
 - (void)setAtLiveEdge:(BOOL)aAtLiveEdge;
 - (void)setCaptionsAvailable:(BOOL)aAvailable enabled:(BOOL)aEnabled;
 - (void)setCaptionSize:(NSString*)aSize;
 // Localized labels (see ZenPipNativeControls.sys.mjs for the keys).
+// "timePosition" and "behindLive" are templates with %1$@ (and %2$@).
 - (void)setStrings:(NSDictionary<NSString*, NSString*>*)aStrings;
 // Intrinsic video size; the player keeps its anchor and adopts the aspect.
 - (void)setVideoSize:(NSSize)aSize;
 // The browser window hosting the source tab. The player stays fully inside
 // the usable area of the display that window is on, and follows it.
 - (void)setSourceWindow:(nullable NSWindow*)aWindow;
-// Tunables: edgeGap, springResponse, springDamping, decelerationRate,
-// flickSpeed, magnetDistance, idleHideDelay, carryWithTwoFingers.
+// Tunables: edgeGap, idleHideDelay, carryWithTwoFingers, rightToLeft (and,
+// for tests, simulateAccessibility: {reduceMotion, increaseContrast}).
 - (void)setConfiguration:(NSDictionary<NSString*, id>*)aConfiguration;
+
+// The player grows out of `aRect` (the video in its page, screen
+// coordinates) into its frame; it fades in when `aRect` is empty.
+- (void)playEntranceFrom:(NSRect)aRect;
+// The player shrinks into `aRect` (the video back in its page) or, when
+// `aRect` is empty, fades out; then the host gets "exit-done".
+- (void)playExitTo:(NSRect)aRect;
 
 - (void)revealControlsSticky:(BOOL)aSticky;
 // Moves keyboard focus onto the native controls (Tab from the player).
 - (void)focusControls;
+// Stashes the player into the nearest side of its display, leaving a tab.
 - (void)minimize;
 - (void)restore;
 
@@ -102,8 +124,8 @@ class ChromeHost {
 // Like testDragBy, but the pointer then rests where it ended (the run loop
 // spins for `aRest` seconds) before a release without velocity.
 - (void)testDragBy:(NSPoint)aDelta
-              duration:(NSTimeInterval)aDuration
-     restBeforeRelease:(NSTimeInterval)aRest;
+             duration:(NSTimeInterval)aDuration
+    restBeforeRelease:(NSTimeInterval)aRest;
 - (void)testResizeHandle:(NSString*)aHandle by:(NSPoint)aDelta;
 // Queues real mouse input through the application's normal event dispatch:
 //   "<place> [clicks=<n>] [drag=<dx>,<dy>] [inset=<pt>]"
@@ -124,8 +146,8 @@ class ChromeHost {
      characters:(NSString*)aCharacters
       modifiers:(NSEventModifierFlags)aModifiers;
 
-// Removes the overlay, observers, timers, display link and the minimized
-// panel. Safe to call more than once; also runs when the window closes.
+// Removes the overlay, observers, timers, display link and the stash tab.
+// Safe to call more than once; also runs when the window closes.
 - (void)invalidate;
 
 @end

@@ -24,8 +24,12 @@ struct Vec2 {
   double x = 0;
   double y = 0;
 
-  Vec2 operator+(const Vec2& aOther) const { return {x + aOther.x, y + aOther.y}; }
-  Vec2 operator-(const Vec2& aOther) const { return {x - aOther.x, y - aOther.y}; }
+  Vec2 operator+(const Vec2& aOther) const {
+    return {x + aOther.x, y + aOther.y};
+  }
+  Vec2 operator-(const Vec2& aOther) const {
+    return {x - aOther.x, y - aOther.y};
+  }
   Vec2 operator*(double aScale) const { return {x * aScale, y * aScale}; }
   double Length() const { return std::hypot(x, y); }
 };
@@ -43,7 +47,6 @@ struct Box {
   Vec2 Origin() const { return {x, y}; }
   Vec2 Size() const { return {width, height}; }
   Vec2 Center() const { return {x + width / 2, y + height / 2}; }
-  bool IsEmpty() const { return width <= 0 || height <= 0; }
 
   bool Contains(const Box& aOther, double aEpsilon = 1e-6) const {
     return aOther.MinX() >= MinX() - aEpsilon &&
@@ -53,8 +56,10 @@ struct Box {
   }
 
   double IntersectionArea(const Box& aOther) const {
-    double w = std::min(MaxX(), aOther.MaxX()) - std::max(MinX(), aOther.MinX());
-    double h = std::min(MaxY(), aOther.MaxY()) - std::max(MinY(), aOther.MinY());
+    double w =
+        std::min(MaxX(), aOther.MaxX()) - std::max(MinX(), aOther.MinX());
+    double h =
+        std::min(MaxY(), aOther.MaxY()) - std::max(MinY(), aOther.MinY());
     return (w > 0 && h > 0) ? w * h : 0;
   }
 
@@ -72,7 +77,6 @@ struct Dock {
   HEdge h = HEdge::None;
   VEdge v = VEdge::None;
 
-  bool IsCorner() const { return h != HEdge::None && v != VEdge::None; }
   bool operator==(const Dock& aOther) const = default;
 };
 
@@ -94,15 +98,6 @@ inline Box AllowedArea(const Box& aVisibleFrame, double aGap) {
   double gapY = std::clamp(aGap, 0.0, std::max(0.0, aVisibleFrame.height / 4));
   return {aVisibleFrame.x + gapX, aVisibleFrame.y + gapY,
           aVisibleFrame.width - 2 * gapX, aVisibleFrame.height - 2 * gapY};
-}
-
-// Fits a size into the area while keeping its aspect ratio.
-inline Vec2 FitSize(Vec2 aSize, const Box& aArea) {
-  if (aSize.x <= 0 || aSize.y <= 0) {
-    return aSize;
-  }
-  double scale = std::min({1.0, aArea.width / aSize.x, aArea.height / aSize.y});
-  return {aSize.x * scale, aSize.y * scale};
 }
 
 // Clamps an origin so that a frame of `aSize` lies fully inside `aArea`. If the
@@ -135,8 +130,7 @@ inline Vec2 OriginForDock(const Dock& aDock, Vec2 aOrigin, Vec2 aSize,
   return ClampOrigin(origin, aSize, aArea);
 }
 
-inline Dock DetectDock(const Box& aFrame, const Box& aArea,
-                       double aTolerance) {
+inline Dock DetectDock(const Box& aFrame, const Box& aArea, double aTolerance) {
   Dock dock;
   if (std::abs(aFrame.MinX() - aArea.MinX()) <= aTolerance) {
     dock.h = HEdge::Left;
@@ -157,12 +151,14 @@ inline Placement PlacementForFrame(const Box& aFrame, const Box& aArea,
   placement.dock = DetectDock(aFrame, aArea, aTolerance);
   double travelX = aArea.width - aFrame.width;
   double travelY = aArea.height - aFrame.height;
-  placement.fx = travelX > 0
-                     ? std::clamp((aFrame.MinX() - aArea.MinX()) / travelX, 0.0, 1.0)
-                     : 0.5;
-  placement.fy = travelY > 0
-                     ? std::clamp((aFrame.MinY() - aArea.MinY()) / travelY, 0.0, 1.0)
-                     : 0.5;
+  placement.fx =
+      travelX > 0
+          ? std::clamp((aFrame.MinX() - aArea.MinX()) / travelX, 0.0, 1.0)
+          : 0.5;
+  placement.fy =
+      travelY > 0
+          ? std::clamp((aFrame.MinY() - aArea.MinY()) / travelY, 0.0, 1.0)
+          : 0.5;
   return placement;
 }
 
@@ -272,14 +268,76 @@ struct ReleaseResult {
   bool isThrow = false;
 };
 
-inline Vec2 CornerOrigin(const Dock& aCorner, Vec2 aSize, const Box& aArea) {
-  return OriginForDock(aCorner, {aArea.x, aArea.y}, aSize, aArea);
+struct Corner {
+  Dock dock;
+  Vec2 origin;
+};
+
+// The corner of `aArea` whose frame of `aSize` is nearest to `aPoint` (a
+// frame center) while overlapping none of `aOccupied`; the nearest corner
+// when every one overlaps.
+inline Corner NearestFreeCorner(Vec2 aPoint, Vec2 aSize, const Box& aArea,
+                                const std::vector<Box>& aOccupied = {}) {
+  static constexpr Dock kCorners[] = {{HEdge::Left, VEdge::Bottom},
+                                      {HEdge::Right, VEdge::Bottom},
+                                      {HEdge::Left, VEdge::Top},
+                                      {HEdge::Right, VEdge::Top}};
+  Corner nearest, nearestFree;
+  double best = std::numeric_limits<double>::infinity();
+  double bestFree = best;
+  for (const Dock& dock : kCorners) {
+    Vec2 origin = OriginForDock(dock, {aArea.x, aArea.y}, aSize, aArea);
+    Box frame = Box::FromOriginSize(origin, aSize);
+    double distance = (frame.Center() - aPoint).Length();
+    if (distance < best) {
+      best = distance;
+      nearest = {dock, origin};
+    }
+    bool free = std::none_of(
+        aOccupied.begin(), aOccupied.end(),
+        [&](const Box& aOther) { return aOther.IntersectionArea(frame) > 0; });
+    if (free && distance < bestFree) {
+      bestFree = distance;
+      nearestFree = {dock, origin};
+    }
+  }
+  return bestFree < std::numeric_limits<double>::infinity() ? nearestFree
+                                                            : nearest;
 }
 
-// Decides where a released player should come to rest.
+// The position nearest to `aWanted` within [aMin, aMax] that stays at least
+// `aSpacing` away from every position in `aTaken` (`aWanted` clamped when
+// there is none), e.g. for tabs stacked along an edge.
+inline double NearestFreeSlot(double aWanted, double aSpacing, double aMin,
+                              double aMax, const std::vector<double>& aTaken) {
+  double wanted = std::clamp(aWanted, aMin, std::max(aMin, aMax));
+  std::vector<double> candidates{wanted};
+  for (double taken : aTaken) {
+    candidates.push_back(taken - aSpacing);
+    candidates.push_back(taken + aSpacing);
+  }
+  double best = wanted;
+  double bestDistance = std::numeric_limits<double>::infinity();
+  for (double candidate : candidates) {
+    bool clear = candidate >= aMin - 1e-6 && candidate <= aMax + 1e-6 &&
+                 std::all_of(aTaken.begin(), aTaken.end(), [&](double aTaken) {
+                   return std::abs(candidate - aTaken) >= aSpacing - 1e-6;
+                 });
+    if (clear && std::abs(candidate - wanted) < bestDistance) {
+      bestDistance = std::abs(candidate - wanted);
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+// Decides where a released player should come to rest: a slow release stays
+// (snapping onto edges within the magnet distance), a throw glides into the
+// corner it heads for, avoiding corners other players (`aOccupied`) take.
 inline ReleaseResult ResolveRelease(const Box& aFrame, Vec2 aVelocity,
                                     const Box& aArea,
-                                    const ReleaseParams& aParams) {
+                                    const ReleaseParams& aParams,
+                                    const std::vector<Box>& aOccupied = {}) {
   ReleaseResult result;
   Vec2 size = aFrame.Size();
   if (aVelocity.Length() < aParams.flickSpeed) {
@@ -289,24 +347,12 @@ inline ReleaseResult ResolveRelease(const Box& aFrame, Vec2 aVelocity,
     result.target = OriginForDock(result.dock, origin, size, aArea);
     return result;
   }
-
   result.isThrow = true;
-  Vec2 projected = Project(aFrame.Center(), aVelocity, aParams.decelerationRate);
-  static constexpr Dock kCorners[] = {{HEdge::Left, VEdge::Bottom},
-                                      {HEdge::Right, VEdge::Bottom},
-                                      {HEdge::Left, VEdge::Top},
-                                      {HEdge::Right, VEdge::Top}};
-  double best = std::numeric_limits<double>::infinity();
-  for (const Dock& corner : kCorners) {
-    Vec2 origin = CornerOrigin(corner, size, aArea);
-    double distance = (Box::FromOriginSize(origin, size).Center() - projected)
-                          .Length();
-    if (distance < best) {
-      best = distance;
-      result.dock = corner;
-      result.target = origin;
-    }
-  }
+  Corner corner = NearestFreeCorner(
+      Project(aFrame.Center(), aVelocity, aParams.decelerationRate), size,
+      aArea, aOccupied);
+  result.dock = corner.dock;
+  result.target = corner.origin;
   return result;
 }
 
@@ -358,23 +404,14 @@ struct SizeLimits {
   double maxFraction = 0.82;
 };
 
-// Width bounds for a given aspect ratio that honour the limits and the area.
-inline void WidthBounds(double aAspect, const Box& aArea,
-                        const SizeLimits& aLimits, double* aMin, double* aMax) {
+inline Vec2 ClampSize(double aWidth, double aAspect, const Box& aArea,
+                      const SizeLimits& aLimits) {
   double maxW = std::min(aArea.width * aLimits.maxFraction,
                          aArea.height * aLimits.maxFraction * aAspect);
   double minW = std::max(aLimits.minWidth, aLimits.minHeight * aAspect);
   // On a tiny display the minimum gives way so the player still fits.
   minW = std::min(minW, std::min(aArea.width, aArea.height * aAspect));
-  *aMin = minW;
-  *aMax = std::max(minW, maxW);
-}
-
-inline Vec2 ClampSize(double aWidth, double aAspect, const Box& aArea,
-                      const SizeLimits& aLimits) {
-  double minW, maxW;
-  WidthBounds(aAspect, aArea, aLimits, &minW, &maxW);
-  double width = std::clamp(aWidth, minW, maxW);
+  double width = std::clamp(aWidth, minW, std::max(minW, maxW));
   return {width, width / aAspect};
 }
 
@@ -383,8 +420,8 @@ inline Vec2 ClampSize(double aWidth, double aAspect, const Box& aArea,
 // opposite the grabbed handle; edge handles keep the perpendicular axis
 // centered. `aDelta` is the pointer movement since the resize started.
 inline Box ResizeFrame(const Box& aStart, ResizeHandle aHandle, Vec2 aDelta,
-                        double aAspect, const Dock& aDock, const Box& aArea,
-                        const SizeLimits& aLimits) {
+                       double aAspect, const Dock& aDock, const Box& aArea,
+                       const SizeLimits& aLimits) {
   int sx = HandleSignX(aHandle);
   int sy = HandleSignY(aHandle);
   double byWidth = aStart.width + sx * aDelta.x;
@@ -425,8 +462,8 @@ inline Box ResizeFrame(const Box& aStart, ResizeHandle aHandle, Vec2 aDelta,
 // Scales the frame about its anchor (docked corner/edge, else its center), as
 // for a pinch gesture.
 inline Box ScaleFrame(const Box& aStart, double aScale, double aAspect,
-                       const Dock& aDock, const Box& aArea,
-                       const SizeLimits& aLimits) {
+                      const Dock& aDock, const Box& aArea,
+                      const SizeLimits& aLimits) {
   Vec2 size = ClampSize(aStart.width * aScale, aAspect, aArea, aLimits);
   double x = aDock.h == HEdge::Left    ? aStart.MinX()
              : aDock.h == HEdge::Right ? aStart.MaxX() - size.x
@@ -462,8 +499,8 @@ struct Spring1D {
       double c = std::cos(wd * aT);
       double s = std::sin(wd * aT);
       *aX = decay * (a * c + b * s);
-      *aV = decay * ((b * wd - zeta * omega * a) * c -
-                     (a * wd + zeta * omega * b) * s);
+      *aV = decay *
+            ((b * wd - zeta * omega * a) * c - (a * wd + zeta * omega * b) * s);
     } else if (zeta == 1) {
       double decay = std::exp(-omega * aT);
       double b = v0 + omega * x0;
@@ -481,9 +518,7 @@ struct Spring1D {
   }
 };
 
-// Two-axis spring from a position/velocity toward a target. Retargeting keeps
-// the current position and velocity, so new input or a new destination blends
-// in without a jump.
+// Two-axis spring from a position and velocity toward a target.
 class Spring2D {
  public:
   void Start(Vec2 aFrom, Vec2 aVelocity, Vec2 aTarget,
@@ -494,12 +529,6 @@ class Spring2D {
     mX.v0 = aVelocity.x;
     mY.x0 = aFrom.y - aTarget.y;
     mY.v0 = aVelocity.y;
-  }
-
-  void Retarget(double aT, Vec2 aNewTarget) {
-    Vec2 position, velocity;
-    Sample(aT, &position, &velocity);
-    Start(position, velocity, aNewTarget, mParams);
   }
 
   void Sample(double aT, Vec2* aPosition, Vec2* aVelocity) const {

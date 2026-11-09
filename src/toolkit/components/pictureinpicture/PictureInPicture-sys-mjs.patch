@@ -1,16 +1,17 @@
 diff --git a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
-index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a003f67a17a 100644
+index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a7d805266 100644
 --- a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
 +++ b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
-@@ -19,6 +19,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
+@@ -19,6 +19,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
      "resource:///modules/asrouter/ASRouter.sys.mjs",
    PageActions: "resource:///modules/PageActions.sys.mjs",
    PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-+  ZenPipNativeControls: "resource:///modules/zen/pip/ZenPipNativeControls.sys.mjs",
++  ZenPipNativeControls:
++    "resource:///modules/zen/pip/ZenPipNativeControls.sys.mjs",
  });
  
  import { Rect, Point } from "resource://gre/modules/Geometry.sys.mjs";
-@@ -127,6 +128,10 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -127,6 +129,10 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
          if (!lazy.PIP_ENABLED || !lazy.PIP_WHEN_SWITCHING_TABS) {
            break;
          }
@@ -21,7 +22,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
  
          // Suppress auto-toggle if the user deliberately closed this PiP window
          if (
-@@ -140,6 +145,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -140,6 +146,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
          if (browser.documentGlobal.gBrowser.selectedBrowser == browser) {
            break;
          }
@@ -31,41 +32,74 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
          let actor = browsingContext.currentWindowGlobal.getActor(
            "PictureInPictureLauncher"
          );
-@@ -222,9 +230,16 @@ export class PictureInPictureParent extends JSWindowActorParent {
+@@ -155,6 +164,15 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+  * a clone of a video element running in web content.
+  */
+ export class PictureInPictureParent extends JSWindowActorParent {
++  // Zen: the video's page can go away without asking to close its player
++  // (e.g. when its tab closes), which left a black, unresponsive player.
++  didDestroy() {
++    PictureInPicture.closeSinglePipWindow({
++      reason: "Pagehide",
++      actorRef: this,
++    });
++  }
++
+   async receiveMessage(aMessage) {
+     switch (aMessage.name) {
+       case "PictureInPicture:Resize": {
+@@ -222,9 +240,14 @@ export class PictureInPictureParent extends JSWindowActorParent {
          if (player) {
            player.setTimestamp(timestamp);
            player.setScrubberPosition(scrubberPosition);
-+          player.zenSetTimeline?.(aMessage.data);
++          player.zenSetTimeline(aMessage.data);
          }
          break;
        }
 +      case "PictureInPicture:ZenLiveTimeline": {
-+        PictureInPicture.getWeakPipPlayer(this)?.zenSetTimeline?.(
-+          aMessage.data
-+        );
++        PictureInPicture.getWeakPipPlayer(this)?.zenSetTimeline(aMessage.data);
 +        break;
 +      }
        case "PictureInPicture:VolumeChange": {
          let { volume } = aMessage.data;
          let player = PictureInPicture.getWeakPipPlayer(this);
-@@ -474,6 +489,7 @@ export var PictureInPicture = {
+@@ -243,6 +266,12 @@ export class PictureInPictureParent extends JSWindowActorParent {
+         }
+         break;
+       }
++      case "PictureInPicture:ZenPlaybackState": {
++        PictureInPicture.getWeakPipPlayer(this)?.zenSetPlaybackState(
++          aMessage.data
++        );
++        break;
++      }
+     }
+     return undefined;
+   }
+@@ -474,6 +503,7 @@ export var PictureInPicture = {
        for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
          if (this.weakWinToBrowser.get(win) === event.target.linkedBrowser) {
            this.weakWinToBrowser.set(win, otherTab.linkedBrowser);
-+          win.zenSetSourceWindow?.(otherTab.documentGlobal);
++          win.zenSetSourceWindow(otherTab.documentGlobal);
            this.removePiPBrowserFromWeakMap(event.target.linkedBrowser);
            this.removeOriginatingWinFromWeakMap(event.target.linkedBrowser);
            this.addPiPBrowserToWeakMap(otherTab.linkedBrowser);
-@@ -572,7 +588,7 @@ export var PictureInPicture = {
+@@ -572,7 +602,13 @@ export var PictureInPicture = {
      // focus the tab's window
      tab.documentGlobal.focus();
  
 -    gBrowser.selectedTab = tab;
-+    browser?.documentGlobal?.gZenWorkspaces.switchIfNeeded(browser);
++    // Zen: onto the tab's Space before the player closes. A Space switch
++    // already under way would make Zen drop this one, so let it finish.
++    let spaces = tab.documentGlobal.gZenWorkspaces;
++    for (let wait = 0; spaces._workspaceChangeInProgress && wait < 40; wait++) {
++      await new Promise(resolve => tab.documentGlobal.setTimeout(resolve, 25));
++    }
++    await spaces.switchTabIfNeeded(tab);
      await this.closeSinglePipWindow({ reason: "Unpip", actorRef: pipActor });
    },
  
-@@ -950,8 +966,7 @@ export var PictureInPicture = {
+@@ -950,10 +986,11 @@ export var PictureInPicture = {
        }
      }
  
@@ -74,8 +108,12 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
 +    this.releasePlayerBrowser(win);
  
      Glean.pictureinpicture["closedMethod" + reason].record();
++    // Zen: the native player fades out, or shrinks back into the video.
++    await win.zenBeforeClose(reason);
      await this.closePipWindow(win);
-@@ -1032,6 +1047,22 @@ export var PictureInPicture = {
+   },
+ 
+@@ -1032,6 +1069,33 @@ export var PictureInPicture = {
    async handlePictureInPictureRequest(wgp, videoData) {
      const isApiRequest = !!videoData.isPipApiRequest;
  
@@ -88,7 +126,18 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
 +      (videoData.isAutoPip ?? !requestingBrowser.docShellIsActive);
 +    const isBrowserSelected = () =>
 +      requestingBrowser.getTabBrowser()?.selectedBrowser == requestingBrowser;
-+    if (isAutoRequest && isBrowserSelected()) {
++    // Its tab can close while the player opens (closing a playing tab
++    // backgrounds it first, which requests an automatic player) or move to
++    // another window.
++    const sourceTab = () => {
++      let tab = requestingBrowser
++        .getTabBrowser()
++        ?.getTabForBrowser(requestingBrowser);
++      return tab?.closing ? null : tab;
++    };
++    const isStale = () =>
++      !sourceTab() || (isAutoRequest && isBrowserSelected());
++    if (isStale()) {
 +      return;
 +    }
 +    if (isAutoRequest) {
@@ -98,7 +147,28 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
      if (isApiRequest) {
        await this.closeApiPipWindowIfOpen();
      }
-@@ -1072,6 +1103,9 @@ export var PictureInPicture = {
+@@ -1049,11 +1113,19 @@ export var PictureInPicture = {
+     let parentWin = browser.documentGlobal;
+ 
+     let win = await this.openPipWindow(parentWin, videoData);
++    // Zen: a player that is never set up keeps dead controls and can't be
++    // closed.
++    if (isStale()) {
++      this.currentPlayerCount -= 1;
++      await this.closePipWindow(win);
++      return;
++    }
++    parentWin = browser.documentGlobal;
+     win.setIsPlayingState(videoData.playing);
+     win.setIsMutedState(videoData.isMuted);
+ 
+     // set attribute which shows pip icon in tab
+-    let tab = parentWin.gBrowser.getTabForBrowser(browser);
++    let tab = sourceTab();
+     tab.setAttribute("pictureinpicture", true);
+ 
+     this.setUrlbarPipIconActive(parentWin);
+@@ -1072,6 +1144,9 @@ export var PictureInPicture = {
  
      this.weakWinToBrowser.set(win, browser);
      this.addPiPBrowserToWeakMap(browser);
@@ -108,16 +178,17 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
      this.addOriginatingWinToWeakMap(browser);
      if (lazy.PIP_WHEN_SWITCHING_TABS && !browser.docShellIsActive) {
        // The docshell would only not be active when the video was pip'd via auto toggle
-@@ -1087,6 +1121,8 @@ export var PictureInPicture = {
+@@ -1087,6 +1162,9 @@ export var PictureInPicture = {
      win.setTimestamp(videoData.timestamp);
      win.setVolume(videoData.volume);
      win.setPlaybackRate(videoData.playbackRate);
-+    win.zenSetTimeline?.(videoData);
-+    win.zenSetSourceWindow?.(parentWin);
++    win.zenSetTimeline(videoData);
++    win.zenSetSourceWindow(parentWin);
++    win.zenPlayEntrance(videoData.zenVideoRect, parentWin.desktopToDeviceScale);
  
      Services.prefs.setBoolPref(TOGGLE_HAS_USED_PREF, true);
  
-@@ -1100,6 +1136,57 @@ export var PictureInPicture = {
+@@ -1100,6 +1178,57 @@ export var PictureInPicture = {
        webVTTSubtitles: videoData.webVTTSubtitles,
      });
      await setupPromise;
@@ -175,7 +246,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
    },
  
    /**
-@@ -1143,6 +1230,11 @@ export var PictureInPicture = {
+@@ -1143,6 +1272,11 @@ export var PictureInPicture = {
      }
  
      let browser = this.weakWinToBrowser.get(window);
@@ -187,7 +258,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
      this.removeOriginatingWinFromWeakMap(browser);
  
      this.currentPlayerCount -= 1;
-@@ -1270,6 +1362,19 @@ export var PictureInPicture = {
+@@ -1270,6 +1404,19 @@ export var PictureInPicture = {
  
      const isPlayer = requestingWin.document.location.href == PLAYER_URI;
  
@@ -207,13 +278,13 @@ index aeb057b0b715ad587c4807832edc217583382d2f..7fd950f283b7545dd548a304cf9d0a00
      let requestingCssToDesktopScale =
        requestingWin.devicePixelRatio / requestingWin.desktopToDeviceScale;
  
-@@ -1611,6 +1716,12 @@ export var PictureInPicture = {
+@@ -1611,6 +1758,12 @@ export var PictureInPicture = {
        return;
      }
  
 +    // Zen: the native chrome keeps its anchor and display while adopting the
 +    // new aspect ratio.
-+    if (win.zenResizeToVideo?.(videoData)) {
++    if (win.zenResizeToVideo(videoData)) {
 +      return;
 +    }
 +

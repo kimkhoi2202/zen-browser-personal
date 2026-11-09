@@ -29,7 +29,17 @@ interface nsIZenPipNativeControlsListener : nsISupports {
 interface nsIZenPipNativeControls : nsISupports {
   void setPlaying(in boolean playing);
   void setMuted(in boolean muted);
+  /** The video's volume, 0 to 1. */
+  void setVolume(in double volume);
   void setPlaybackRate(in double rate);
+  /**
+   * @param buffering Waiting for data while playing.
+   * @param ended Playback reached the end.
+   * @param loaded Fraction of the video loaded ahead of the position, or a
+   *   negative value when unknown (live streams).
+   */
+  void setPlaybackState(in boolean buffering, in boolean ended,
+                        in double loaded);
   /**
    * @param currentTime Seconds.
    * @param duration Seconds; NaN/Infinity when unknown or live.
@@ -51,6 +61,18 @@ interface nsIZenPipNativeControls : nsISupports {
   /** @param configJSON Motion and visibility tunables. */
   void setConfiguration(in AUTF8String configJSON);
 
+  /**
+   * The player grows out of the video in its page, a rect in desktop pixels
+   * (top-left origin, like screenX/screenY); it fades in for an empty rect.
+   */
+  void playEntrance(in double left, in double top, in double width,
+                    in double height);
+  /**
+   * The player shrinks into the video in its page (same coordinates) or,
+   * for an empty rect, fades out; then the listener gets "exit-done".
+   */
+  void playExit(in double left, in double top, in double width,
+                in double height);
   void revealControls(in boolean sticky);
   void focusControls();
   void minimize();

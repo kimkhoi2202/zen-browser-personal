@@ -35,8 +35,10 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
         "components.conf",
     ]
 
+    # nsMenuBarX.h, for handing the player's unused shortcuts to the menu bar.
     LOCAL_INCLUDES += [
         "/widget",
+        "/widget/cocoa",
     ]
 
     FINAL_LIBRARY = "xul"

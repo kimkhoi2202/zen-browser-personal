@@ -1,5 +1,5 @@
 diff --git a/toolkit/components/pictureinpicture/content/player.js b/toolkit/components/pictureinpicture/content/player.js
-index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cbe250e730 100644
+index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..6e735103717ca5856b025bbfd4d4ca7c015c8956 100644
 --- a/toolkit/components/pictureinpicture/content/player.js
 +++ b/toolkit/components/pictureinpicture/content/player.js
 @@ -14,6 +14,9 @@ const { DeferredTask } = ChromeUtils.importESModule(
@@ -12,7 +12,22 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
  
  const AUDIO_TOGGLE_ENABLED_PREF =
    "media.videocontrols.picture-in-picture.audio-toggle.enabled";
-@@ -160,12 +163,56 @@ function closeFromForeground() {
+@@ -90,6 +93,14 @@ function setupPlayer(id, wgp, videoRef, isPipApiRequest, autoFocus) {
+   return Player.init(id, wgp, videoRef, isPipApiRequest, autoFocus);
+ }
+ 
++// Zen: a player that is never set up (its request failed after the window
++// opened) has dead controls and no way to close it.
++setTimeout(() => {
++  if (!Player._isInitialized) {
++    window.close();
++  }
++}, 5000);
++
+ /**
+  * Public function to be called from PictureInPicture.sys.mjs. This update the
+  * controls based on whether or not the video is playing.
+@@ -160,12 +171,84 @@ function closeFromForeground() {
    Player.closeFromForeground();
  }
  
@@ -49,6 +64,34 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
 +}
 +
 +/**
++ * Zen: waiting for data while playing, and whether playback reached the end.
++ *
++ * @param {object} data { buffering, ended }
++ */
++function zenSetPlaybackState(data) {
++  Player.zenNative?.setPlaybackState(data);
++}
++
++/**
++ * Zen: the native player grows out of the video in its page.
++ *
++ * @param {object|null} rect The video in device pixels, or null to fade in.
++ * @param {number} desktopToDeviceScale Of the source window's display.
++ */
++function zenPlayEntrance(rect, desktopToDeviceScale) {
++  Player.zenNative?.playEntrance(rect, desktopToDeviceScale);
++}
++
++/**
++ * Zen: lets the native player play its exit before it closes for `reason`.
++ *
++ * @returns {Promise}
++ */
++function zenBeforeClose(reason) {
++  return Player.zenNative?.beforeClose(reason);
++}
++
++/**
 + * Zen: the native chrome session, for diagnostics and tests.
 + */
 +function zenNativeSession() {
@@ -69,7 +112,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
    WINDOW_EVENTS: [
      "click",
      "contextmenu",
-@@ -431,10 +478,20 @@ let Player = {
+@@ -431,10 +514,20 @@ let Player = {
  
      this._isInitialized = true;
  
@@ -90,7 +133,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      this.resizeDebouncer.disarm();
      PictureInPicture.unload(window, this.actor);
    },
-@@ -481,6 +538,9 @@ let Player = {
+@@ -481,6 +574,9 @@ let Player = {
        }
  
        case "keydown": {
@@ -100,7 +143,15 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
          if (event.keyCode == KeyEvent.DOM_VK_TAB) {
            this.controls.setAttribute(KEYING_ATTRIBUTE, true);
            this.showVideoControls();
-@@ -781,6 +841,7 @@ let Player = {
+@@ -761,6 +857,7 @@ let Player = {
+     }
+ 
+     this.audioScrubber.value = volume;
++    this.zenNative?.setVolume(volume);
+   },
+ 
+   // Rates stepped through by the < and > shortcuts; distinct from the preset
+@@ -781,6 +878,7 @@ let Player = {
        return;
      }
      this._playbackRate = playbackRate;
@@ -108,7 +159,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      let rounded = Math.round(playbackRate * 100) / 100;
      this.playbackRateSlider.value = rounded;
      document.l10n.setAttributes(
-@@ -1001,6 +1062,11 @@ let Player = {
+@@ -1001,6 +1099,11 @@ let Player = {
          document.getElementById("large").click();
          break;
        }
@@ -120,7 +171,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      }
      // If the click came from a element that is not inside the subtitles settings panel
      // then we want to hide the panel
-@@ -1070,6 +1136,9 @@ let Player = {
+@@ -1070,6 +1173,9 @@ let Player = {
    },
  
    fullscreenModeToggle() {
@@ -130,7 +181,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      if (this.isFullscreen) {
        document.exitFullscreen();
      } else {
-@@ -1194,6 +1263,7 @@ let Player = {
+@@ -1194,6 +1300,7 @@ let Player = {
      this.actor.sendAsyncMessage("PictureInPicture:ToggleTextTracks");
  
      this.captionsToggleEnabled = !this.captionsToggleEnabled;
@@ -138,7 +189,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      Services.prefs.setBoolPref(
        CAPTIONS_TOGGLE_ENABLED_PREF,
        this.captionsToggleEnabled
-@@ -1424,6 +1494,10 @@ let Player = {
+@@ -1424,6 +1531,10 @@ let Player = {
  
    enableSubtitlesButton() {
      this.closedCaptionButton.disabled = false;
@@ -149,7 +200,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
  
      this.alignEndControlsButtonTooltips();
      this.captionsToggleEnabled = true;
-@@ -1437,6 +1511,7 @@ let Player = {
+@@ -1437,6 +1548,7 @@ let Player = {
  
    disableSubtitlesButton() {
      this.closedCaptionButton.disabled = true;
@@ -157,7 +208,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
  
      this.alignEndControlsButtonTooltips();
    },
-@@ -1596,6 +1671,7 @@ let Player = {
+@@ -1596,6 +1708,7 @@ let Player = {
  
    set isPlaying(isPlaying) {
      this._isPlaying = isPlaying;
@@ -165,7 +216,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      this.controls.classList.toggle("playing", isPlaying);
      let strId = isPlaying
        ? `pictureinpicture-pause-btn`
-@@ -1635,6 +1711,7 @@ let Player = {
+@@ -1635,6 +1748,7 @@ let Player = {
  
    set isMuted(isMuted) {
      this._isMuted = isMuted;
@@ -173,7 +224,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      if (!isMuted) {
        this.audioScrubber.max = 1;
      } else if (!this.audioScrubbing) {
-@@ -1675,6 +1752,9 @@ let Player = {
+@@ -1675,6 +1789,9 @@ let Player = {
     * so that subtitles are visible when showing video controls.
     */
    showVideoControls() {
@@ -183,7 +234,7 @@ index 6c42e1b84fb95ebdc80632b7651049b8b8badbfe..aa8862309bf24409524e0983bc6aa6cb
      // offsetParent returns null when the element or any ancestor has display: none
      // See https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/offsetParent
      this.actor.sendAsyncMessage("PictureInPicture:ShowVideoControls", {
-@@ -1690,6 +1770,9 @@ let Player = {
+@@ -1690,6 +1807,9 @@ let Player = {
     * so that subtitles take up remaining space when hiding video controls.
     */
    hideVideoControls() {

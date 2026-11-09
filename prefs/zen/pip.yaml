@@ -13,28 +13,6 @@
 - name: zen.pip.edge-gap
   value: 10
 
-# Glide spring: undamped period in ms and damping ratio in percent (100 is
-# critically damped, lower allows a slight settle).
-- name: zen.pip.motion.response-ms
-  value: 420
-
-- name: zen.pip.motion.damping-percent
-  value: 86
-
-# Throw projection: per-millisecond deceleration (per mille). 998 matches the
-# "normal" scroll deceleration on Apple platforms.
-- name: zen.pip.motion.deceleration-per-mille
-  value: 998
-
-# Releases slower than this (points/second) are placements, faster ones are
-# throws toward a corner.
-- name: zen.pip.motion.flick-speed
-  value: 320
-
-# Slow placements this close (points) to an edge snap onto it.
-- name: zen.pip.motion.magnet-distance
-  value: 36
-
 # Two-finger trackpad scrolling over the player carries it like a drag.
 - name: zen.pip.motion.two-finger-carry
   value: true
