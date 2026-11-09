@@ -80,7 +80,7 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## Verification — personal.21 (candidate, not installed yet)
+## Verification and installation — personal.21
 
 personal.21 = a new full-source engine from `3f73fd0d` (round 8 of the
 independent project: stuck black players fixed, stash into the screen edge,
@@ -112,6 +112,14 @@ optimized stage 17.5 min), packaged from the same commit.
   Gatekeeper accepted. The personal.20 candidate and rollback copies had
   been re-registered again and were unregistered; only `/Applications/Zen.app`
   holds `com.kimkhoi.zen`.
+- Installed 2026-11-08 21:14 with the owner's approval after they quit Zen
+  (which also cleared a stuck black player of personal.20): 17,335 profile
+  fingerprints unchanged; installed bytes match the candidate; signature,
+  staple and Gatekeeper verified in place; SourceStamp `3f73fd0d`. http/https
+  still open `com.kimkhoi.zen`, the only registered copy (the candidate had
+  been re-registered by the install checks and was unregistered). Rollback:
+  `Previous Zen.app.disabled` (personal.20) and the profile copy in
+  `Backups/Yab Style PiP 2026-11-08 21-14-26`.
 
 ## Verification and installation — personal.20
 
