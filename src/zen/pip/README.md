@@ -11,7 +11,8 @@ element's decoder, so there is no second decode and no frame copying. Playback
 commands still travel through the stock `PictureInPictureParent/Child` actors
 (and their site-specific video wrappers), so every control acts on the original
 video. Automatic pop-out uses Firefox's tab-switch PiP
-(`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`).
+(`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`),
+with its own choice of video (see Automatic Picture-in-Picture).
 
 ## What this module adds
 
@@ -34,14 +35,15 @@ Patches to upstream files (in `src/`):
   moved while the player opened (it stayed black with dead controls and
   couldn't be closed), a player closes when its video's page goes away
   without asking, auto-PiP drops requests the user already came back from
-  and keeps one automatic player at a time, and Back to tab waits for a Space
-  switch already under way.
+  and keeps one automatic player at a time (and one per tab, whichever frame
+  asks first), and Back to tab waits for a Space switch already under way.
 - `toolkit/actors/PictureInPictureChild-sys-mjs.patch` – seek amount parameter
   and numeric time/duration/live alongside the formatted timestamp; live
   streams' seekable window, its timeline updates and Go to live (see Live
   streams); the video's place on screen and its buffering, ended and loaded
   state; applies the system caption style and places captions just above
-  the native timeline.
+  the native timeline; which video pops out automatically, and finding
+  videos inside shadow trees (see Automatic Picture-in-Picture).
 - `browser/extensions/pictureinpicture/video-wrappers/youtube-js.patch` –
   YouTube's live window and live edge from its own player.
 - `toolkit/themes/shared/pictureinpicture/texttracks-css.patch` – caption box
@@ -190,6 +192,36 @@ back to the source window's display, and returns when the display comes
 back. When the usable area changes (the Dock or menu bar shown, hidden or
 moved), the player goes back to the edges it rests against; window managers
 and the Zoom command can't move it out of its area.
+
+## Automatic Picture-in-Picture
+
+Leaving a tab (or its Space) pops out the largest video in it that is playing
+with sound, on any site, and coming back puts it back inline. Each frame
+decides for its own videos when its document is hidden. A video counts when
+it is not paused or ended (buffering or seeking at that moment still counts),
+not muted, its volume is above zero, it has an audio track and a picture, it
+is drawn at least 64 px on each side and it is not hidden. There is no
+minimum length. Videos without sound stay in their tab, so background loops,
+muted ads and GIF-style clips don't follow the user around.
+
+Firefox's own choice (the focused video, else the first one that isn't
+paused, and at least 45 s long) is not used for this, because it missed
+most players that aren't a plain `<video>` in the page:
+
+- It searched with `querySelectorAll`, which never finds a video inside a
+  shadow tree, where players built as web components keep theirs
+  (`<wistia-player>`, `<mux-player>`, Reddit). The toggle actor is told
+  about every video (`UAWidgetSetupOrChange`), so it records them per
+  document, weakly, and the search adds those. The keyboard shortcut and
+  Zen's media bar button use the same list.
+- It gave up when the first playing video was a muted one (a background
+  loop above the real video).
+- It heard that the tab was hidden only while a video was in the viewport,
+  so a video playing below the fold stayed behind. The listeners are now
+  installed with the document's first video.
+
+A tab gets one automatic player. A page and the players embedded in it each
+ask for their own video, and the first request wins.
 
 ## Preferences
 
