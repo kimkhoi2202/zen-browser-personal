@@ -86,6 +86,48 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.23 (candidate, not installed yet)
+
+personal.23 = a new full-source engine from `0ce926d8` (round 10 of the
+independent project: automatic Picture-in-Picture for any video playing with
+sound, not only YouTube and plain `<video>` pages; built by `build_engine.sh`
+prepare/optimized/locales/package reusing the October 31 PGO profile, with 8
+build jobs because the Mac was in use: optimized stage 16.5 min), packaged
+from the same commit.
+
+- Source checks: 112 Node and 16 Python fork tests. The new `any-site`
+  browser group failed on the personal.22 code where the owner saw it (a
+  Wistia player keeps its video in a shadow tree; also a muted background
+  video first in the page, a 20 s clip and a video scrolled out of view:
+  14/21) and passes on the fix (22/22, build tree and packaged preview). The
+  earlier automatic-PiP groups, YouTube and round 8 pass (30/30). Real
+  players on the packaged preview: the reported WildFit page (Wistia), Vimeo
+  and YouTube embeds, Mux Player and a 10 s HTML5 clip pop out when the tab
+  is left and go back inline.
+- Browser checks on the Dev candidate (throwaway profile): 60/62 across
+  `any-site`, the real players, automatic PiP, Spaces, window close,
+  minimized return, deliberate close, several tabs, lifecycle, YouTube and
+  round 8. The two misses were the Vimeo embed, which the test had left
+  paused (it pressed the player's button and also started the video itself);
+  it re-ran 2/2 with the test waiting for steady playback. In that re-run
+  the Wistia video popped out but was found paused afterwards: macOS
+  delivered a system pause command to the test browser (an engine log of the
+  same symptom shows `MediaControlKeyHandler OnActionPerformed 'pause'`,
+  with no pause from the page or the PiP actors). Test profiles now stay out
+  of Now Playing (`media.hardwaremediakeys.enabled` false).
+- Frontend comparison with the installed personal.22: browser/omni.ja
+  unchanged (13,526 entries); toolkit omni.ja differs only in
+  `PictureInPictureChild.sys.mjs`, `PictureInPicture.sys.mjs` and the build
+  metadata (`buildconfig.html`, `AppConstants.sys.mjs`).
+- Production candidate `dist/yab-pip-personal.23-production` (kept as
+  `Zen.app.disabled`, unregistered from Launch Services): signed by
+  fingerprint with the installed app's certificate, satisfying its
+  designated requirement; notarization
+  46f5b8f8-de99-4245-98a8-9f3144ffef09 Accepted (no issues), stapled,
+  Gatekeeper accepted. Only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+- Not installed: it needs the owner's approval with Zen closed
+  (`Private/Yab Style PiP/Install Ready.py`).
+
 ## Verification and installation — personal.22
 
 personal.22 = a new full-source engine from `8a2adb28` (round 9 of the
