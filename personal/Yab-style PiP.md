@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (16 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (17 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -65,7 +65,12 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 - Arc-style automatic PiP: a playing, audible video pops out when its tab or
   Space is left and returns inline when it is selected again
   (`media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled`
-  now defaults to true). Settings are the `zen.pip.*` prefs in
+  now defaults to true). Since personal.23 that is the largest video playing
+  with sound on any site: also one inside a web component's shadow tree
+  (Wistia, Mux, Reddit), below a muted background video, scrolled out of
+  view, or shorter than 45 s; through personal.22 it was Firefox's stock
+  choice, which missed all of those. Videos without sound stay in their tab,
+  and a tab gets one automatic player. Settings are the `zen.pip.*` prefs in
   `prefs/zen/pip.yaml`; `zen.pip.native-controls.enabled=false` restores the
   stock player.
 
