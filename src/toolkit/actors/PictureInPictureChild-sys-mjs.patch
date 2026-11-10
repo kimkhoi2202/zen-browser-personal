@@ -1,5 +1,5 @@
 diff --git a/toolkit/actors/PictureInPictureChild.sys.mjs b/toolkit/actors/PictureInPictureChild.sys.mjs
-index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f75745287 100644
+index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..23fbe4e89df0d71961f2c5f7811cf4d0df586624 100644
 --- a/toolkit/actors/PictureInPictureChild.sys.mjs
 +++ b/toolkit/actors/PictureInPictureChild.sys.mjs
 @@ -19,7 +19,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
@@ -16,10 +16,10 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
  import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  
  XPCOMUtils.defineLazyPreferenceGetter(
-@@ -157,6 +162,44 @@ function applyWrapper(pipChild, originatingVideo) {
-  * @param {string} documentURI
-  * @returns { object | null }
-  */
+@@ -150,6 +155,107 @@ function applyWrapper(pipChild, originatingVideo) {
+   );
+ }
+ 
 +// Zen: media events that can change the native player's spinner, replay
 +// button or loaded range.
 +const ZEN_PLAYBACK_STATE_EVENTS = [
@@ -58,10 +58,73 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
 +  };
 +}
 +
- function getSiteOverrideForDocument(documentURI) {
-   // gSiteOverrides is a list of tuples where the first element is the MatchPattern
-   // for a supported site and the second is the actual overrides object for it.
-@@ -285,6 +328,16 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
++// Zen: every <video> each document has shown, kept weakly. Players built as
++// web components (<wistia-player>, <mux-player>, Reddit's player) keep their
++// video in a shadow tree, where querySelectorAll never finds it.
++const gZenDocumentVideos = new WeakMap();
++
++function zenRememberVideo(video) {
++  let videos = gZenDocumentVideos.get(video.ownerDocument);
++  if (!videos) {
++    videos = new WeakSet();
++    gZenDocumentVideos.set(video.ownerDocument, videos);
++  }
++  videos.add(video);
++}
++
++/**
++ * Zen: the videos in a document, including the ones inside shadow trees.
++ *
++ * @param {Document} doc
++ * @returns {HTMLVideoElement[]}
++ */
++function zenVideosIn(doc) {
++  let videos = new Set(doc.querySelectorAll("video"));
++  let known = gZenDocumentVideos.get(doc);
++  if (known) {
++    for (let video of ChromeUtils.nondeterministicGetWeakSetKeys(known)) {
++      if (video.isConnected && video.ownerDocument == doc) {
++        videos.add(video);
++      }
++    }
++  }
++  return [...videos];
++}
++
++// Zen: a video drawn smaller than this on either side is not being watched
++// (pages play sound through hidden or 1 px videos).
++const ZEN_AUTO_PIP_MIN_SIDE = 64;
++
++/**
++ * Zen: whether a video should follow the user out of its tab: it is playing,
++ * it can be heard and its picture is on the page. Unlike the toggle's
++ * heuristics this has no minimum length, so short clips count, and a video
++ * that is buffering or seeking at that moment still counts as playing.
++ *
++ * @param {HTMLVideoElement} video
++ * @returns {boolean}
++ */
++function zenVideoIsWorthAutoPiP(video) {
++  return (
++    !video.paused &&
++    !video.ended &&
++    (video.readyState > video.HAVE_CURRENT_DATA || video.played.length) &&
++    !video.muted &&
++    video.volume > 0 &&
++    video.mozHasAudio &&
++    video.videoWidth > 0 &&
++    video.videoHeight > 0 &&
++    video.clientWidth >= ZEN_AUTO_PIP_MIN_SIDE &&
++    video.clientHeight >= ZEN_AUTO_PIP_MIN_SIDE &&
++    video.checkVisibility() &&
++    !video.isCloningElementVisually
++  );
++}
++
+ /**
+  * Returns the site override object for the given document, or null
+  * if no site override applies.
+@@ -285,6 +391,16 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
        volume: PictureInPictureChild.videoWrapper.getVolume(video),
        playbackRate: PictureInPictureChild.videoWrapper.getPlaybackRate(video),
        autoFocus,
@@ -78,15 +141,110 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
      });
  
      // Some tests don't bother setting a reason.
-@@ -346,6 +399,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
-       if (
-         video &&
-         PictureInPictureChild.videoIsPlaying(video) &&
-+        !video.muted &&
-         PictureInPictureChild.videoIsPiPEligible(video)
-       ) {
+@@ -323,9 +439,7 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+   findVideoToPiP(doc) {
+     let video = doc.activeElement;
+     if (!HTMLVideoElement.isInstance(video)) {
+-      let listOfVideos = [...doc.querySelectorAll("video")].filter(
+-        v => !isNaN(v.duration)
+-      );
++      let listOfVideos = zenVideosIn(doc).filter(v => !isNaN(v.duration));
+       // Get the first non-paused video, otherwise the longest video. This
+       // fallback is designed to skip over "preview"-style videos on sidebars.
+       video =
+@@ -342,12 +456,20 @@ export class PictureInPictureLauncherChild extends JSWindowActorChild {
+   autoToggle() {
+     let doc = this.document;
+     if (doc) {
+-      let video = this.findVideoToPiP(doc);
+-      if (
+-        video &&
+-        PictureInPictureChild.videoIsPlaying(video) &&
+-        PictureInPictureChild.videoIsPiPEligible(video)
+-      ) {
++      // Zen: the largest video that is playing with sound, wherever it is in
++      // the page. The stock choice (the focused video, else the first one
++      // that isn't paused) gave up on pages that also play a muted video,
++      // and never saw a video inside a shadow tree.
++      let video = null;
++      let largest = 0;
++      for (let candidate of zenVideosIn(doc)) {
++        let area = candidate.clientWidth * candidate.clientHeight;
++        if (area > largest && zenVideoIsWorthAutoPiP(candidate)) {
++          video = candidate;
++          largest = area;
++        }
++      }
++      if (video) {
          this.togglePictureInPicture({ video, reason: "AutoPip" }, false);
-@@ -1847,8 +1901,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+       }
+     }
+@@ -666,6 +788,19 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
+ 
+     state.intersectionObserver.observe(video);
+ 
++    // Zen: automatic Picture-in-Picture has to hear that the tab was left
++    // even while its video plays out of view. These listeners used to be
++    // installed only while a video was in the viewport.
++    zenRememberVideo(video);
++    if (!state.zenWatchesTab && this.contentWindow) {
++      state.zenWatchesTab = true;
++      for (let type of ["pageshow", "pagehide", "visibilitychange"]) {
++        this.contentWindow.addEventListener(type, this, {
++          mozSystemGroup: true,
++        });
++      }
++    }
++
+     if (!lazy.PIP_URLBAR_BUTTON) {
+       return;
+     }
+@@ -960,16 +1095,6 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
+       mozSystemGroup: true,
+       capture: true,
+     });
+-    this.contentWindow.addEventListener("pageshow", this, {
+-      mozSystemGroup: true,
+-    });
+-    this.contentWindow.addEventListener("pagehide", this, {
+-      mozSystemGroup: true,
+-    });
+-    lazy.logConsole.debug("Adding visibilitychange event handler");
+-    this.contentWindow.addEventListener("visibilitychange", this, {
+-      mozSystemGroup: true,
+-    });
+     this.addMouseButtonListeners();
+     state.isTrackingVideos = true;
+   }
+@@ -993,18 +1118,6 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
+       mozSystemGroup: true,
+       capture: true,
+     });
+-    if (this.contentWindow) {
+-      this.contentWindow.removeEventListener("pageshow", this, {
+-        mozSystemGroup: true,
+-      });
+-      this.contentWindow.removeEventListener("pagehide", this, {
+-        mozSystemGroup: true,
+-      });
+-      lazy.logConsole.debug("Removing visibilitychange event handler");
+-      this.contentWindow.removeEventListener("visibilitychange", this, {
+-        mozSystemGroup: true,
+-      });
+-    }
+     this.removeMouseButtonListeners();
+     let oldOverVideo = this.getWeakOverVideo();
+     if (oldOverVideo) {
+@@ -1044,7 +1157,7 @@ export class PictureInPictureToggleChild extends JSWindowActorChild {
+   onVisibilityChange() {
+     // Ignore if the document was unloaded or unloading
+     let state = this.docState;
+-    if (state.isUnloaded) {
++    if (!state || state.isUnloaded) {
+       return;
+     }
+ 
+@@ -1847,8 +1960,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
      const textTracksFontScale = this.document
        .querySelector(":root")
        .style.getPropertyValue("--font-scale");
@@ -100,7 +258,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
        textTracks.removeAttribute("overlap-video-controls");
        return;
      }
-@@ -1866,6 +1924,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -1866,6 +1983,12 @@ export class PictureInPictureChild extends JSWindowActorChild {
          } else {
            root.style.setProperty("--player-controls-scrubber-height", "0px");
          }
@@ -113,7 +271,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
          textTracks.setAttribute("overlap-video-controls", true);
        } else {
          textTracks.removeAttribute("overlap-video-controls");
-@@ -2086,10 +2150,22 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2086,10 +2209,22 @@ export class PictureInPictureChild extends JSWindowActorChild {
        // Intentional fall-through
        case "play": {
          this.sendAsyncMessage("PictureInPicture:Playing");
@@ -136,7 +294,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
          break;
        }
        case "volumechange": {
-@@ -2181,8 +2257,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2181,8 +2316,17 @@ export class PictureInPictureChild extends JSWindowActorChild {
              {
                scrubberPosition,
                timestamp,
@@ -154,7 +312,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
          }
          break;
        }
-@@ -2291,12 +2376,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2291,12 +2435,15 @@ export class PictureInPictureChild extends JSWindowActorChild {
          let selectedTime;
          let video = this.getWeakVideo();
          let currentTime = this.videoWrapper.getCurrentTime(video);
@@ -172,7 +330,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
            selectedTime = selectedTime <= maxtime ? selectedTime : maxtime;
          }
          this.videoWrapper.setCurrentTime(video, selectedTime);
-@@ -2326,6 +2414,20 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2326,6 +2473,20 @@ export class PictureInPictureChild extends JSWindowActorChild {
          this.toggleTextTracks();
          break;
        }
@@ -193,7 +351,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
        case "PictureInPicture:ChangeFontSizeTextTracks": {
          this.setTextTrackFontSize();
          break;
-@@ -2360,9 +2462,49 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2360,9 +2521,49 @@ export class PictureInPictureChild extends JSWindowActorChild {
      const video = this.getWeakVideo();
      let duration = this.videoWrapper.getDuration(video);
      let currentTime = scrubberPosition * duration;
@@ -243,7 +401,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
    /**
     * @returns {boolean} true if a textTrack with mode "hidden" should be treated as "showing"
     */
-@@ -2409,6 +2551,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2409,6 +2610,40 @@ export class PictureInPictureChild extends JSWindowActorChild {
     * Set the font size on the PiP window using the current font size value from
     * the "media.videocontrols.picture-in-picture.display-text-tracks.size" pref
     */
@@ -284,7 +442,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
    setTextTrackFontSize() {
      const fontSize = Services.prefs.getStringPref(
        TEXT_TRACK_FONT_SIZE,
-@@ -2449,6 +2625,9 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2449,6 +2684,9 @@ export class PictureInPictureChild extends JSWindowActorChild {
        originatingVideo.addEventListener("resize", this);
        originatingVideo.addEventListener("emptied", this);
        originatingVideo.addEventListener("timeupdate", this);
@@ -294,7 +452,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
  
        if (lazy.DISPLAY_TEXT_TRACKS_PREF) {
          this.setupTextTracks(originatingVideo);
-@@ -2505,6 +2684,11 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2505,6 +2743,11 @@ export class PictureInPictureChild extends JSWindowActorChild {
        originatingVideo.removeEventListener("resize", this);
        originatingVideo.removeEventListener("emptied", this);
        originatingVideo.removeEventListener("timeupdate", this);
@@ -306,7 +464,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
  
        if (lazy.DISPLAY_TEXT_TRACKS_PREF) {
          this.removeTextTracks(originatingVideo);
-@@ -2652,6 +2836,62 @@ export class PictureInPictureChild extends JSWindowActorChild {
+@@ -2652,6 +2895,62 @@ export class PictureInPictureChild extends JSWindowActorChild {
        },
        { once: true }
      );
@@ -369,7 +527,7 @@ index 03282197633ad237bbd6fe3d9f3cd3a2fa53291d..49d2df748b9ac96c4f1791aa55d5397f
    }
  
    #onResizeNotifyPictureInPictureWindowInstance() {
-@@ -3555,6 +3795,67 @@ class PictureInPictureChildVideoWrapper {
+@@ -3555,6 +3854,67 @@ class PictureInPictureChildVideoWrapper {
        validateRetVal: retVal => this.#isBoolean(retVal),
      });
    }

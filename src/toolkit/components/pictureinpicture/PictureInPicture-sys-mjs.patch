@@ -1,5 +1,5 @@
 diff --git a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
-index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a7d805266 100644
+index aeb057b0b715ad587c4807832edc217583382d2f..311716118476e8933ee110a0b66580406c517832 100644
 --- a/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
 +++ b/toolkit/components/pictureinpicture/PictureInPicture.sys.mjs
 @@ -19,6 +19,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
@@ -11,7 +11,20 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
  });
  
  import { Rect, Point } from "resource://gre/modules/Geometry.sys.mjs";
-@@ -127,6 +129,10 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -84,6 +86,12 @@ export class PictureInPictureLauncherParent extends JSWindowActorParent {
+     switch (aMessage.name) {
+       case "PictureInPicture:Request": {
+         let videoData = aMessage.data;
++        if (videoData.isAutoPip) {
++          return PictureInPicture.zenHandleAutoPipRequest(
++            this.manager,
++            videoData
++          );
++        }
+         return PictureInPicture.handlePictureInPictureRequest(
+           this.manager,
+           videoData
+@@ -127,6 +135,10 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
          if (!lazy.PIP_ENABLED || !lazy.PIP_WHEN_SWITCHING_TABS) {
            break;
          }
@@ -22,7 +35,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
  
          // Suppress auto-toggle if the user deliberately closed this PiP window
          if (
-@@ -140,6 +146,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -140,6 +152,9 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
          if (browser.documentGlobal.gBrowser.selectedBrowser == browser) {
            break;
          }
@@ -32,7 +45,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
          let actor = browsingContext.currentWindowGlobal.getActor(
            "PictureInPictureLauncher"
          );
-@@ -155,6 +164,15 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
+@@ -155,6 +170,15 @@ export class PictureInPictureToggleParent extends JSWindowActorParent {
   * a clone of a video element running in web content.
   */
  export class PictureInPictureParent extends JSWindowActorParent {
@@ -48,7 +61,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
    async receiveMessage(aMessage) {
      switch (aMessage.name) {
        case "PictureInPicture:Resize": {
-@@ -222,9 +240,14 @@ export class PictureInPictureParent extends JSWindowActorParent {
+@@ -222,9 +246,14 @@ export class PictureInPictureParent extends JSWindowActorParent {
          if (player) {
            player.setTimestamp(timestamp);
            player.setScrubberPosition(scrubberPosition);
@@ -63,7 +76,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
        case "PictureInPicture:VolumeChange": {
          let { volume } = aMessage.data;
          let player = PictureInPicture.getWeakPipPlayer(this);
-@@ -243,6 +266,12 @@ export class PictureInPictureParent extends JSWindowActorParent {
+@@ -243,6 +272,12 @@ export class PictureInPictureParent extends JSWindowActorParent {
          }
          break;
        }
@@ -76,7 +89,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      }
      return undefined;
    }
-@@ -474,6 +503,7 @@ export var PictureInPicture = {
+@@ -474,6 +509,7 @@ export var PictureInPicture = {
        for (let win of Services.wm.getEnumerator(WINDOW_TYPE)) {
          if (this.weakWinToBrowser.get(win) === event.target.linkedBrowser) {
            this.weakWinToBrowser.set(win, otherTab.linkedBrowser);
@@ -84,7 +97,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
            this.removePiPBrowserFromWeakMap(event.target.linkedBrowser);
            this.removeOriginatingWinFromWeakMap(event.target.linkedBrowser);
            this.addPiPBrowserToWeakMap(otherTab.linkedBrowser);
-@@ -572,7 +602,13 @@ export var PictureInPicture = {
+@@ -572,7 +608,13 @@ export var PictureInPicture = {
      // focus the tab's window
      tab.documentGlobal.focus();
  
@@ -99,7 +112,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      await this.closeSinglePipWindow({ reason: "Unpip", actorRef: pipActor });
    },
  
-@@ -950,10 +986,11 @@ export var PictureInPicture = {
+@@ -950,10 +992,11 @@ export var PictureInPicture = {
        }
      }
  
@@ -113,7 +126,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      await this.closePipWindow(win);
    },
  
-@@ -1032,6 +1069,33 @@ export var PictureInPicture = {
+@@ -1032,6 +1075,33 @@ export var PictureInPicture = {
    async handlePictureInPictureRequest(wgp, videoData) {
      const isApiRequest = !!videoData.isPipApiRequest;
  
@@ -147,7 +160,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      if (isApiRequest) {
        await this.closeApiPipWindowIfOpen();
      }
-@@ -1049,11 +1113,19 @@ export var PictureInPicture = {
+@@ -1049,11 +1119,19 @@ export var PictureInPicture = {
      let parentWin = browser.documentGlobal;
  
      let win = await this.openPipWindow(parentWin, videoData);
@@ -168,7 +181,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      tab.setAttribute("pictureinpicture", true);
  
      this.setUrlbarPipIconActive(parentWin);
-@@ -1072,6 +1144,9 @@ export var PictureInPicture = {
+@@ -1072,6 +1150,9 @@ export var PictureInPicture = {
  
      this.weakWinToBrowser.set(win, browser);
      this.addPiPBrowserToWeakMap(browser);
@@ -178,7 +191,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      this.addOriginatingWinToWeakMap(browser);
      if (lazy.PIP_WHEN_SWITCHING_TABS && !browser.docShellIsActive) {
        // The docshell would only not be active when the video was pip'd via auto toggle
-@@ -1087,6 +1162,9 @@ export var PictureInPicture = {
+@@ -1087,6 +1168,9 @@ export var PictureInPicture = {
      win.setTimestamp(videoData.timestamp);
      win.setVolume(videoData.volume);
      win.setPlaybackRate(videoData.playbackRate);
@@ -188,7 +201,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
  
      Services.prefs.setBoolPref(TOGGLE_HAS_USED_PREF, true);
  
-@@ -1100,6 +1178,57 @@ export var PictureInPicture = {
+@@ -1100,6 +1184,85 @@ export var PictureInPicture = {
        webVTTSubtitles: videoData.webVTTSubtitles,
      });
      await setupPromise;
@@ -196,6 +209,34 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
 +    // Zen: the user came back to the tab while the player was opening.
 +    if (isAutoRequest && isBrowserSelected()) {
 +      await this.closeSinglePipWindow({ reason: "Foregrounded", actorRef });
++    }
++  },
++
++  // Zen: browsers whose automatic player is being opened.
++  zenOpeningAutoPipBrowsers: new WeakSet(),
++
++  /**
++   * Zen: a tab gets one automatic player. Every frame with a video asks for
++   * its own when the tab is left (a page and the players embedded in it), so
++   * the first request wins.
++   *
++   * @param {WindowGlobalParent} wgp The frame asking for the player.
++   * @param {object} videoData See handlePictureInPictureRequest.
++   */
++  async zenHandleAutoPipRequest(wgp, videoData) {
++    let browser = wgp.browsingContext.top.embedderElement;
++    if (
++      !browser ||
++      this.weakAutoPipBrowserToParent.has(browser) ||
++      this.zenOpeningAutoPipBrowsers.has(browser)
++    ) {
++      return;
++    }
++    this.zenOpeningAutoPipBrowsers.add(browser);
++    try {
++      await this.handlePictureInPictureRequest(wgp, videoData);
++    } finally {
++      this.zenOpeningAutoPipBrowsers.delete(browser);
 +    }
 +  },
 +
@@ -246,7 +287,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
    },
  
    /**
-@@ -1143,6 +1272,11 @@ export var PictureInPicture = {
+@@ -1143,6 +1306,11 @@ export var PictureInPicture = {
      }
  
      let browser = this.weakWinToBrowser.get(window);
@@ -258,7 +299,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      this.removeOriginatingWinFromWeakMap(browser);
  
      this.currentPlayerCount -= 1;
-@@ -1270,6 +1404,19 @@ export var PictureInPicture = {
+@@ -1270,6 +1438,19 @@ export var PictureInPicture = {
  
      const isPlayer = requestingWin.document.location.href == PLAYER_URI;
  
@@ -278,7 +319,7 @@ index aeb057b0b715ad587c4807832edc217583382d2f..6f6becc6ddc68b2dfa7f9386cead354a
      let requestingCssToDesktopScale =
        requestingWin.devicePixelRatio / requestingWin.desktopToDeviceScale;
  
-@@ -1611,6 +1758,12 @@ export var PictureInPicture = {
+@@ -1611,6 +1792,12 @@ export var PictureInPicture = {
        return;
      }
  
