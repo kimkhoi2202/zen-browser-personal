@@ -110,8 +110,9 @@ class ChromeHost {
 - (void)revealControlsSticky:(BOOL)aSticky;
 // Moves keyboard focus onto the native controls (Tab from the player).
 - (void)focusControls;
-// Stashes the player into the nearest side of its display, leaving a tab.
+// Minimizes the player into the Dock, like any window.
 - (void)minimize;
+// Brings a minimized or stashed player back.
 - (void)restore;
 
 // Introspection for tests and diagnostics.

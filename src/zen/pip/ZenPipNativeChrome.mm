@@ -22,6 +22,12 @@
 #  error "ZenPipNativeChrome.mm must be compiled with -fobjc-arc"
 #endif
 
+// AppKit's own switch for windows that don't activate their app when clicked
+// (NSPanel uses it); checked at run time.
+@interface NSWindow (ZenPipWindowServer)
+- (void)_setPreventsActivation:(BOOL)aFlag;
+@end
+
 // NSGlassEffectView.effectIsInteractive is new in macOS 27. Gecko builds
 // against Mozilla's pinned 26.5 SDK, so declare it when the SDK lacks it; it
 // is only ever used behind a runtime availability check.
@@ -1127,6 +1133,9 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
   HEdge mStashSide;
   NSRect mFrameBeforeStash;
   ZenPipStashTab* mTab;
+  // On its way into the Dock; the window reports itself minimized only once
+  // it has arrived.
+  BOOL mMinimizing;
 
   // Display the user dragged the player onto (0: follow the source window).
   CGDirectDisplayID mHomeDisplay;
@@ -1172,6 +1181,10 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
   // The player stays on screen when Zen is hidden (Command-H), so the video
   // stays in view while the user works in another app.
   aWindow.canHide = NO;
+  // Minimize sends the player to the Dock like any window, which AppKit only
+  // does for windows with a minimize button; the player's is its own.
+  aWindow.styleMask |= NSWindowStyleMaskMiniaturizable;
+  [self keepAppInBackground];
   for (NSWindowButton b :
        {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton}) {
     [aWindow standardWindowButton:b].hidden = YES;
@@ -1315,6 +1328,18 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
          selector:@selector(windowOcclusionChanged:)
              name:NSWindowDidChangeOcclusionStateNotification
            object:window];
+  [nc addObserver:self
+         selector:@selector(windowWillMiniaturize:)
+             name:NSWindowWillMiniaturizeNotification
+           object:window];
+  [nc addObserver:self
+         selector:@selector(windowDidMiniaturize:)
+             name:NSWindowDidMiniaturizeNotification
+           object:window];
+  [nc addObserver:self
+         selector:@selector(windowDidDeminiaturize:)
+             name:NSWindowDidDeminiaturizeNotification
+           object:window];
   // Display added/removed/rearranged, resolution, Dock or menu bar changes.
   [nc addObserver:self
          selector:@selector(screensChanged:)
@@ -1360,8 +1385,8 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 // Something other than the chrome moved or resized the player (a window
 // manager, Accessibility, the Window > Zoom command): back inside its area.
 - (void)windowFrameChanged:(NSNotification*)aNote {
-  if (mSettingFrame || mGesture != ZenPipGestureNone || mStashed || mExiting ||
-      [self isAnimating]) {
+  if (mSettingFrame || mGesture != ZenPipGestureNone || [self isAway] ||
+      mExiting || [self isAnimating]) {
     return;
   }
   [NSObject
@@ -1420,7 +1445,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 // wrapping around. From outside the controls, Tab starts at play/pause.
 - (void)moveKeyboardFocusBackwards:(BOOL)aBackwards {
   NSWindow* window = mWindow;
-  if (mStashed) {
+  if ([self isAway]) {
     return;
   }
   [self showControls];
@@ -1608,6 +1633,9 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)setStrings:(NSDictionary<NSString*, NSString*>*)aStrings {
   mStrings = [aStrings copy] ?: @{};
+  // What the Dock calls the player while it is minimized.
+  mWindow.miniwindowTitle = [self string:@"title"
+                                fallback:@"Picture-in-Picture"];
   [self refreshAllControls];
 }
 
@@ -1625,11 +1653,11 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 }
 
 // Adopts the video's aspect, keeping about the same area and the anchor. It
-// waits while the player is being dragged, resized, animated or stashed, and
-// runs when that ends.
+// waits while the player is being dragged, resized, animated, stashed or
+// minimized, and runs when that ends.
 - (void)applyVideoAspect {
   NSWindow* window = mWindow;
-  if (!mAspectPending || !window || mStashed || mExiting ||
+  if (!mAspectPending || !window || [self isAway] || mExiting ||
       mGesture != ZenPipGestureNone || [self isAnimating]) {
     return;
   }
@@ -2065,7 +2093,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 }
 
 - (void)showControls {
-  if (mControlsVisible || mStashed || mExiting) {
+  if (mControlsVisible || [self isAway] || mExiting) {
     return;
   }
   mControlsVisible = YES;
@@ -2173,7 +2201,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 }
 
 - (void)focusControls {
-  if (mStashed) {
+  if ([self isAway]) {
     return;
   }
   [self showControls];
@@ -2508,7 +2536,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 // moved, a display rearranged), the same edges it rests against.
 - (void)settleAnimated:(BOOL)aAnimated {
   NSWindow* window = mWindow;
-  if (!window || mStashed || mExiting || mGesture != ZenPipGestureNone ||
+  if (!window || [self isAway] || mExiting || mGesture != ZenPipGestureNone ||
       mFrameAnimations > 0) {
     return;
   }
@@ -2545,7 +2573,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)sourceScreenChanged {
   NSWindow* window = mWindow;
-  if (!window || mStashed || mExiting) {
+  if (!window || [self isAway] || mExiting) {
     return;
   }
   if ([self homeIsPinned]) {
@@ -2621,7 +2649,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)reportPlacement {
   NSWindow* window = mWindow;
-  if (!window || mStashed || mExiting) {
+  if (!window || [self isAway] || mExiting) {
     return;
   }
   Box frame = ToRect(window.frame);
@@ -3166,7 +3194,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)overlayScroll:(NSEvent*)aEvent {
   if (!mConfig.carryWithTwoFingers || !aEvent.hasPreciseScrollingDeltas ||
-      mStashed) {
+      [self isAway]) {
     return;
   }
   NSEventPhase phase = aEvent.phase;
@@ -3199,7 +3227,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)overlayMagnify:(NSEvent*)aEvent {
   NSWindow* window = mWindow;
-  if (!window || mStashed) {
+  if (!window || [self isAway]) {
     return;
   }
   if (aEvent.phase == NSEventPhaseBegan) {
@@ -3239,8 +3267,69 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
   return nearer;
 }
 
+// A click on the player must leave the app the user is in in front. Gecko
+// makes the player a non-activating window through its style mask, which is
+// enough for AppKit, but the window server brings an app forward on a click
+// unless the window itself says otherwise, and AppKit only says so for
+// NSPanel. Without this a click on the player made Zen the active app, and
+// minimizing or closing the player then brought a browser window forward.
+- (void)keepAppInBackground {
+  NSWindow* window = mWindow;
+  if ([window respondsToSelector:@selector(_setPreventsActivation:)]) {
+    [window _setPreventsActivation:YES];
+  }
+}
+
+// Out of sight: stashed into a side of its display, or minimized.
+- (BOOL)isAway {
+  return mStashed || mMinimizing || mWindow.isMiniaturized;
+}
+
+// The minimize button and Command-M: into the Dock, like any window. Playback
+// continues; the player comes back from the Dock, and going back to the
+// video's tab closes it as usual.
 - (void)minimize {
-  [self stashToward:[self stashSide]];
+  NSWindow* window = mWindow;
+  if (!window || mExiting || [self isAway]) {
+    return;
+  }
+  [window miniaturize:nil];
+}
+
+// However it was minimized (the button, Command-M, the Window menu).
+- (void)windowWillMiniaturize:(NSNotification*)aNote {
+  mMinimizing = YES;
+  [self stopAnimation];
+  [self cancelEdgeHold];
+  mGesture = ZenPipGestureNone;
+  mOwnsPress = NO;
+  mPointerInside = NO;  // the pointer is on the minimize button
+  [self hideControls];
+}
+
+- (void)windowDidMiniaturize:(NSNotification*)aNote {
+  mMinimizing = NO;
+}
+
+- (void)windowDidDeminiaturize:(NSNotification*)aNote {
+  mMinimizing = NO;
+  [self keepAppInBackground];
+  // AppKit makes a window key when it comes back from the Dock. From
+  // another app that would take the keyboard from the app the user is in;
+  // only a click on the player does that.
+  __weak ZenPipPlayerChrome* weakSelf = self;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    ZenPipPlayerChrome* chrome = weakSelf;
+    if (chrome && !NSRunningApplication.currentApplication.isActive &&
+        chrome->mWindow.isKeyWindow) {
+      [NSApp deactivate];
+    }
+  });
+  // The displays, the Dock or the video's shape may have changed meanwhile.
+  [self settleAnimated:NO];
+  [self applyVideoAspect];
+  [self reportPlacement];
+  [self revealControlsFor:kInitialRevealDuration];
 }
 
 // The frame just past a side of the player's display, at the height of
@@ -3259,12 +3348,11 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 // past that side, and with Reduce Motion, it fades out instead.
 - (void)stashToward:(HEdge)aSide {
   NSWindow* window = mWindow;
-  if (!window || mStashed || mExiting) {
+  if (!window || mExiting || [self isAway]) {
     return;
   }
   [self stopAnimation];
-  mPointerInside =
-      NO;  // the pointer is on the minimize button: keep the cursor
+  mPointerInside = NO;
   [self hideControls];
   mStashed = YES;
   mStashSide = aSide;
@@ -3301,6 +3389,10 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)restore {
   NSWindow* window = mWindow;
+  if (window.isMiniaturized && !mExiting) {
+    [window deminiaturize:nil];
+    return;
+  }
   if (!window || !mStashed || mExiting) {
     return;
   }
@@ -3418,7 +3510,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
 
 - (void)playEntranceFrom:(NSRect)aRect {
   NSWindow* window = mWindow;
-  if (!window || mExiting || mStashed) {
+  if (!window || mExiting || [self isAway]) {
     return;
   }
   NSRect target = window.frame;
@@ -3451,7 +3543,7 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
   [self cancelEdgeHold];
   mGesture = ZenPipGestureNone;
   mOwnsPress = NO;
-  if (!window || mStashed) {
+  if (!window || [self isAway]) {
     [mTab orderOut:nil];
     [self notifyHost:"exit-done" value:0 detail:nil];
     return;
@@ -3568,6 +3660,8 @@ static NSHashTable<ZenPipPlayerChrome*>* AllPlayers() {
     @"restDock" : DockName(mRestDock),
     @"animating" : @([self isAnimating]),
     @"tucked" : @(mStashed),
+    @"minimized" : @(window.isMiniaturized),
+    @"appFrontmost" : @(NSRunningApplication.currentApplication.isActive),
     @"stashSide" : mStashSide == HEdge::Left ? @"left" : @"right",
     @"tuckPanelVisible" : @(mTab.isVisible),
     @"tuckPanelFrame" : mTab ? rect(mTab.frame) : @[],
