@@ -8,7 +8,7 @@ class SourceBuiltEngine(unittest.TestCase):
         self.assertEqual(engine_affecting([
             'personal/channels.json', 'personal/launcher.c', 'scripts/personal/build_macos.py',
             'src/zen/urlbar/PersonalCommandActions.mjs', 'src/zen/urlbar/ZenUrlbarController.mjs',
-            'src/zen/spaces/ZenSpaceManager.mjs',
+            'src/zen/spaces/ZenSpaceManager.mjs', 'src/zen/common/sys/ZenCustomizableUI.sys.mjs',
             'locales/en-US/browser/browser/zen-command-palette.ftl', 'README.md', 'docs/index.md',
             'Generation Scripts/README.md', 'personal/Yab-style PiP.md']), [])
 
