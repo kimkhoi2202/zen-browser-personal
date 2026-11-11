@@ -108,9 +108,17 @@ on the border (small players bring the top row and timeline within it) still
 get their presses; the empty corners of their squares resize.
 
 Keys: Space, ←/→ ±15 s, ↑/↓ volume, M, C, < >, Return (back to the tab), Esc
-(close; Shift-Esc keeps playing), ⌘W, ⌘⌥⇧P, and ⌘M stashes the player. Other
-Command shortcuts (⌘Q, ⌘H, ⌘,) run the menu bar's items, as in any Zen
+(close; Shift-Esc keeps playing), ⌘W, ⌘⌥⇧P, and ⌘M minimizes the player.
+Other Command shortcuts (⌘Q, ⌘H, ⌘,) run the menu bar's items, as in any Zen
 window. The player stays on screen when Zen is hidden.
+
+The player never brings Zen in front of the app the user is in. Gecko makes
+it a non-activating window through its style mask, which AppKit honors, but
+the window server activates an app on a click unless the clicked window
+carries its "prevents activation" tag, and AppKit sets that tag only for
+`NSPanel`. The chrome sets it (`-[NSWindow _setPreventsActivation:]`, checked
+at run time). Without it a click on the player made Zen the active app, and
+minimizing or closing the player then brought a browser window forward.
 
 ## Motion
 
@@ -120,14 +128,20 @@ out of the video in its page (a fade for automatic Picture-in-Picture);
 back to the tab it shrinks into the video again, and closing it fades it out.
 A drag that reaches the edge of the display gives a trackpad tick.
 
-Minimize stashes the player into the nearer side of its display, the way
-macOS stashes its own Picture-in-Picture: it slides off the screen and leaves
-a glass tab at the edge. Pushing the player far past a side while dragging
-(40% of its width) and letting go stashes it too, with a second tick when it
-gets that far. A click on the tab, Space or Return once the tab has keyboard
-focus (window cycling reaches it) or VoiceOver brings it back; dragging the
-tab moves it along the edge. It never stashes into a side with another display
-beyond it, and Reduce Motion turns the slides into fades.
+Minimize (the button, ⌘M) is the system's: the player goes into the Dock like
+any window, as a tile named after the player, and nothing stays on screen.
+Playback continues. Its tile brings it back where it was; from another app
+that leaves the app in front and the keyboard with it. Going back to the
+video's tab closes a minimized player like any other.
+
+Pushing the player far past a side of its display while dragging (40% of its
+width) and letting go stashes it there instead, the way macOS stashes its own
+Picture-in-Picture, with a second tick when it gets that far: it slides off
+the screen and leaves a glass tab at the edge. A click on the tab, Space or
+Return once the tab has keyboard focus (window cycling reaches it) or
+VoiceOver brings it back; dragging the tab moves it along the edge. It never
+stashes into a side with another display beyond it, and Reduce Motion turns
+the slides into fades.
 
 Several players keep out of each other's way: a throw avoids corners another
 player takes, a new player opened over another moves to a free corner, and

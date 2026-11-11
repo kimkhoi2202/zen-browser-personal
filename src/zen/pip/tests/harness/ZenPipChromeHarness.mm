@@ -125,6 +125,19 @@ static void Spin(NSTimeInterval aSeconds) {
       runUntilDate:[NSDate dateWithTimeIntervalSinceNow:aSeconds]];
 }
 
+// Drags the player far past the right side of its area and lets go, which
+// stashes it there.
+static void StashByPush(ZenPipPlayerChrome* aChrome) {
+  NSDictionary* state = [aChrome debugState];
+  NSArray* frame = state[@"windowFrame"];
+  NSArray* area = state[@"allowedArea"];
+  CGFloat toEdge = [area[0] doubleValue] + [area[2] doubleValue] -
+                   [frame[0] doubleValue] - [frame[2] doubleValue];
+  [aChrome testDragBy:NSMakePoint(toEdge + 0.7 * [frame[2] doubleValue], 0)
+             duration:0.3
+              release:NSZeroPoint];
+}
+
 // Like Spin, but also dispatches queued events the way the application's
 // event loop does (through -[NSApplication sendEvent:] and its monitors).
 static void Pump(NSTimeInterval aSeconds) {
@@ -264,8 +277,8 @@ int main(int argc, char** argv) {
                              ]];
         [task waitUntilExit];
         // Then the player stashed, and the tab it leaves at the screen edge.
-        [chrome minimize];
-        Spin(0.6);
+        StashByPush(chrome);
+        Spin(0.9);
         NSArray* tab = [chrome debugState][@"tuckPanelFrame"];
         CGFloat top = NSMaxY(NSScreen.screens.firstObject.frame);
         CGRect area =
@@ -1164,16 +1177,16 @@ int main(int argc, char** argv) {
                     follows[@"playerScreen"]]);
         moveSource(avf);
       }
-      // Minimize stashes the player into a side of the display, leaving a tab
-      // there, and the tab brings it back.
-      [chrome minimize];
-      Spin(0.5);
+      // Pushed far past a side of the display and let go, the player stashes
+      // there, leaving a tab, and the tab brings it back.
+      StashByPush(chrome);
+      Spin(0.9);
       NSDictionary* tucked = [chrome debugState];
       check([tucked[@"tucked"] boolValue] &&
                 ![tucked[@"windowVisible"] boolValue] &&
                 [tucked[@"tuckPanelVisible"] boolValue],
             [NSString
-                stringWithFormat:@"minimize stashes into the %@ side (tab %@)",
+                stringWithFormat:@"a push past the %@ side stashes (tab %@)",
                                  tucked[@"stashSide"],
                                  tucked[@"tuckPanelFrame"]]);
       check([chrome testClickControl:@"restore"],
@@ -1184,6 +1197,25 @@ int main(int argc, char** argv) {
                 [restored[@"windowVisible"] boolValue] &&
                 [restored[@"insideAllowedArea"] boolValue],
             @"restore brings the player back inside the area");
+      // Minimize is the system's: into the Dock, nothing left on screen.
+      [chrome minimize];
+      Spin(1.2);
+      NSDictionary* minimized = [chrome debugState];
+      check([minimized[@"minimized"] boolValue] &&
+                ![minimized[@"windowVisible"] boolValue] &&
+                ![minimized[@"tucked"] boolValue] &&
+                ![minimized[@"tuckPanelVisible"] boolValue],
+            [NSString stringWithFormat:@"minimize goes to the Dock and leaves "
+                                       @"no tab (minimized=%@ visible=%@)",
+                                       minimized[@"minimized"],
+                                       minimized[@"windowVisible"]]);
+      [chrome restore];
+      Spin(1.2);
+      NSDictionary* back = [chrome debugState];
+      check(![back[@"minimized"] boolValue] &&
+                [back[@"windowVisible"] boolValue] &&
+                [back[@"insideAllowedArea"] boolValue],
+            @"restore brings it back from the Dock, inside the area");
       // Real NSButton target/action round trips.
       for (NSString* name in
            @[ @"playPause", @"back15", @"forward15", @"sound", @"captions" ]) {

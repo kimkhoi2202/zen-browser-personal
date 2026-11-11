@@ -146,6 +146,7 @@ const LABELS = [
   ["goLive", "zen-pip-go-live"],
   ["behindLive", "zen-pip-behind-live", { duration: "%1$@" }],
   ["restore", "zen-pip-restore"],
+  ["title", "pictureinpicture-player-title"],
 ];
 
 async function localizedLabels(document) {
