@@ -4,7 +4,7 @@ The user asked for a Yab/Arc-style PiP for Zen and accepted the independent
 implementation developed in `~/Documents/Zen Browser - Independent PiP`
 (isolated "Zen (PiP Preview)" app, 2026-10-30/31). On 2026-10-31 they lifted
 that project's isolation rule and asked for it in the daily Zen and this fork.
-Its `feature/yab-style-pip` (17 commits on upstream 1.23.4b) is merged here
+Its `feature/yab-style-pip` (18 commits on upstream 1.23.4b) is merged here
 unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
 `PiP Placement` are not part of it.
 
@@ -37,7 +37,7 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   Since personal.21 every press outside the controls goes through the
   chrome: dragging or resizing never takes the keyboard, only a click does.
   Command shortcuts the player doesn't use (⌘Q, ⌘H, ⌘,) run the menu bar's
-  items; ⌘M stashes the player; it stays on screen when Zen is hidden.
+  items; ⌘M minimizes the player; it stays on screen when Zen is hidden.
 - Physical motion: drag, flick with momentum into corners, rubber-band edges,
   two-finger carry, corner-anchored resize, always inside the usable area of
   the source window's display and following that window. Holding it at an
@@ -46,9 +46,19 @@ unchanged; the older PiP prototypes in `Native PiP`, `PiP Motion` and
   players take; it re-docks when the Dock or menu bar changes and returns
   after window managers move it; a new player grows out of the video, Back
   to tab shrinks it back in, closing fades it out.
-- Minimize (or pushing the player well past a side) stashes it into the side
-  of its display, leaving a glass tab that brings it back and can be dragged
-  along the edge (personal.21; a pill at the edge before).
+- Minimize (the button, ⌘M) puts the player in the Dock like any window, as
+  a tile named Picture-in-Picture, and leaves nothing on screen; the tile
+  brings it back (personal.25, at the owner's request: before, it stashed
+  into the screen edge and left a tab there). Pushing the player well past
+  a side of its display still stashes it there, leaving a glass tab that
+  brings it back and can be dragged along the edge (personal.21).
+- Using the player never brings Zen in front of the app you are in
+  (personal.25). A click on it used to make Zen the active app, so
+  minimizing or closing it from another app brought a browser window
+  forward: Gecko marks the player non-activating only in its style mask, and
+  the window server needs its own "prevents activation" tag on the window,
+  which AppKit sets only for `NSPanel`. The player now sets it. Back from
+  the Dock, the keyboard stays with the app in front.
 - Stuck players fixed (personal.21): closing a playing tab used to leave a
   black player with dead stock controls that couldn't be closed (upstream
   Zen #11881).
