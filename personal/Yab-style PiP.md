@@ -86,7 +86,11 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## Verification — personal.23 (candidate, not installed yet)
+## Verification — personal.23 (candidate, superseded by personal.24)
+
+personal.24 is this candidate with one more frontend module replaced
+([Sidebar Width](Sidebar%20Width.md)); its Picture-in-Picture files are the
+ones verified here. Install personal.24, not this one.
 
 personal.23 = a new full-source engine from `0ce926d8` (round 10 of the
 independent project: automatic Picture-in-Picture for any video playing with
