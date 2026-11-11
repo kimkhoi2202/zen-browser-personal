@@ -29,7 +29,10 @@ engine (`ADDITIONAL_UI`), the same way as `ZenSpaceManager.mjs`, so no engine
 rebuild is needed: personal.24 is the personal.23 engine (`0ce926d8`, round 10
 of the Yab-style PiP) with this one module replaced.
 
-## Verification — personal.24 (candidate, not installed yet)
+## Verification — personal.24 (candidate, superseded by personal.25)
+
+personal.25 carries this fix too (same overlay, 10/10 on its Dev candidate);
+see [Yab-style PiP](Yab-style%20PiP.md). Install personal.25, not this one.
 
 - Source checks: 112 Node and 16 Python fork tests pass
   (`source_built_test.py` covers the new overlay path).

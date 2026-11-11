@@ -96,6 +96,65 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## Verification — personal.25 (candidate, not installed yet)
+
+personal.25 = a new full-source engine from `a858657e` (round 11 of the
+independent project: the minimize button and ⌘M minimize the player into the
+Dock instead of stashing it with a tab at the screen edge, and the player
+carries the window server's "prevents activation" tag so that using it from
+another app no longer brings Zen forward; built by `build_engine.sh`
+prepare/optimized/locales/package reusing the October 31 PGO profile, 8 build
+jobs, optimized stage 16.7 min), packaged from the same commit. It also
+carries everything in the personal.23 and personal.24 candidates, which were
+never installed: round 10 (any video playing with sound pops out) and the
+sidebar width reset fix ([Sidebar Width](Sidebar%20Width.md)).
+
+- What the owner reported (2026-11-10, with a screenshot of the stash tab):
+  "The minimize shouldn't have this. It should just minimize the PiP and
+  that's it. It also automatically goes back to Zen browser when I'm in
+  another app and I don't like that."
+- The second part did not reproduce with the tests' clicks (round 10 preview
+  and the personal.24 Dev candidate, automatic player, another app in
+  front): they are queued inside the browser and never pass the window
+  server. The window server's own flag showed the cause: "prevents
+  activation" was 0 on the player and 1 on a real non-activating panel, so a
+  real click on the player made Zen the active app, and a Zen window took
+  over when the player went away. It is 1 now, also after a trip to the
+  Dock. A real mouse click was not used to confirm it (that would take over
+  the owner's pointer); the owner should try it.
+- Source checks: 112 Node and 16 Python fork tests; the native harness of
+  the independent project: layout 153/153, keys 4/4, clicks 63/63, motion
+  21/21.
+- Browser checks on the Dev candidate (throwaway profile): 130/130 across
+  attach, controls, video size changes, motion, corners, minimize, return,
+  automatic PiP, Spaces, window close, minimized return, the new `other-app`
+  group, deliberate close, keyboard, accessibility, captions, several tabs,
+  round 8, round 9, `any-site`, lifecycle and YouTube; the real players
+  10/10 (the WildFit Wistia page, Vimeo and YouTube embeds, Mux Player, a
+  10 s HTML5 clip). New in this round: minimize puts the player in the Dock
+  with nothing left on screen and playback continues; its Dock tile
+  ("Picture-in-Picture", pressed through Accessibility) brings it back and
+  leaves the other app in front with the keyboard; minimizing and closing
+  from another app leave that app in front; no tile is left behind; the
+  push-past-the-edge stash and its tab still work. The sidebar checks pass
+  10/10 on the same candidate (headless).
+- Frontend comparison: against the personal.24 candidate only
+  `modules/zen/pip/ZenPipNativeControls.sys.mjs` (the Dock tile's name) and
+  the engine's build metadata differ; against the installed personal.22 also
+  `ZenCustomizableUI.sys.mjs` and the two Picture-in-Picture modules of
+  round 10. The rest of round 11 is native code in the engine.
+- Production candidate `dist/yab-pip-personal.25-production` (kept as
+  `Zen.app.disabled`, unregistered from Launch Services): signed by
+  fingerprint with the installed app's certificate, satisfying its
+  designated requirement; notarization
+  8f60f471-bf33-4aec-a08c-7ef9c61254b1 Accepted (no issues), stapled,
+  Gatekeeper accepted. Only `/Applications/Zen.app` holds `com.kimkhoi.zen`;
+  http and https still open in it.
+- Not installed: it needs the owner's approval with Zen closed
+  (`Private/Yab Style PiP/Install Ready.py` with the candidate and
+  `a858657e0aacbfe4dfb48c4232943ff054f0848f`). Install this one, not the
+  personal.23 or personal.24 candidates.
+
 ## Verification — personal.23 (candidate, superseded by personal.24)
 
 personal.24 is this candidate with one more frontend module replaced
