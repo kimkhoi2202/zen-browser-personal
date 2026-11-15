@@ -32,6 +32,9 @@
 - name: zen.ctrlTab.show-pending-tabs
   value: false
 
+- name: zen.ctrlTab.all-spaces
+  value: true # Ctrl+Tab lists recent tabs from every Space in the window
+
 - name: zen.mediacontrols.enabled
   value: true
 
