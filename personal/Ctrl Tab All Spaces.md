@@ -36,3 +36,9 @@ list (applies from the next Space switch or window).
 
 The change is in a Firefox patch, so it needs an engine build
 (`scripts/personal/build_engine.sh`), not only `build_macos.py`.
+
+## Verification
+
+personal.26 Dev candidate: 10/10 in `ctrl_tab_spaces_tests.py` (see
+[Yab-style PiP](Yab-style%20PiP.md), personal.26); personal.25: 2/10.
+Not yet tried by hand with a real keyboard in the daily profile.

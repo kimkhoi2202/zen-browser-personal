@@ -101,7 +101,28 @@ changes still package the same way on top of that engine.
 personal.25 plus Ctrl+Tab across all Spaces
 ([Ctrl Tab All Spaces](Ctrl%20Tab%20All%20Spaces.md), branch
 `feature/ctrl-tab-all-spaces`). The change is a Firefox patch, so the engine
-is rebuilt from this commit.
+was rebuilt from `6b4ece2a` (`build_engine.sh` prepare/optimized/locales/
+package reusing the October 31 PGO profile, 8 jobs, optimized stage 28 min)
+and packaged from the same commit.
+
+- Source checks: 112 Node and 6 Python fork test scripts pass.
+- Browser check (independent project's `Release Build Scripts/
+  ctrl_tab_spaces_tests.py`, headless, throwaway profile, Marionette key
+  input): Dev candidate **10/10**. Two tabs in each of two Spaces: the list
+  and the open switcher show `B2, B1, A2, A1`; Ctrl+Tab Tab focuses `A2`,
+  releasing Control selects it and switches to its Space; the pref false
+  lists only the active Space. The same check on the personal.25 Dev
+  candidate: 2/10 (list `B2, B1` only, the key presses just flip between the
+  two), which is the reported behavior.
+- Production candidate `dist/yab-pip-personal.26-production` (kept as
+  `Zen.app.disabled`, unregistered): signed by fingerprint
+  C30023C18D0E672B1335F817756776C59554A78D; notarization
+  25f35d87-5574-41ff-928d-415d2883bedc Accepted, stapled, Gatekeeper
+  accepted. Only `/Applications/Zen.app` holds `com.kimkhoi.zen`.
+- Not installed: needs the owner's approval with Zen closed
+  (`Private/Yab Style PiP/Install Ready.py` with the candidate and
+  `6b4ece2a6e053e1b5123a8f509d5cbba5f049fd1`). The PiP suite was not re-run:
+  nothing PiP-related changed since personal.25.
 
 ## Verification — personal.25 (candidate, not installed yet)
 
