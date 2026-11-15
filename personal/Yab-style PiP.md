@@ -96,6 +96,13 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
+## personal.26 (candidate)
+
+personal.25 plus Ctrl+Tab across all Spaces
+([Ctrl Tab All Spaces](Ctrl%20Tab%20All%20Spaces.md), branch
+`feature/ctrl-tab-all-spaces`). The change is a Firefox patch, so the engine
+is rebuilt from this commit.
+
 ## Verification — personal.25 (candidate, not installed yet)
 
 personal.25 = a new full-source engine from `a858657e` (round 11 of the
