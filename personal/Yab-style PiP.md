@@ -96,7 +96,7 @@ includes it is built with `scripts/personal/build_engine.sh` and
 the released-engine artifact path cannot carry it. Frontend-only personal
 changes still package the same way on top of that engine.
 
-## personal.26 (candidate)
+## Verification and installation — personal.26
 
 personal.25 plus Ctrl+Tab across all Spaces
 ([Ctrl Tab All Spaces](Ctrl%20Tab%20All%20Spaces.md), branch
@@ -123,6 +123,17 @@ and packaged from the same commit.
   (`Private/Yab Style PiP/Install Ready.py` with the candidate and
   `6b4ece2a6e053e1b5123a8f509d5cbba5f049fd1`). The PiP suite was not re-run:
   nothing PiP-related changed since personal.25.
+- Installed 2026-11-16 17:42 after the owner quit Zen and asked for the
+  update (replacing personal.22, so it also brings the never-installed
+  personal.23-25 PiP changes): 34,307 profile fingerprints unchanged;
+  installed bytes match the candidate; signature, staple and Gatekeeper
+  verified in place; SourceStamp `6b4ece2a`, build ID 20261114225700.
+  The candidate and the previous app had been registered by the install
+  checks and were unregistered; only `/Applications/Zen.app` holds
+  `com.kimkhoi.zen`. Relaunched on the daily profile: window restored, nine
+  processes and about 1.6 GB right after start (20 GB before the restart,
+  after 5.5 days). Rollback: `Previous Zen.app.disabled` (personal.22) and
+  the profile copy in `Backups/Yab Style PiP 2026-11-16 17-42-19`.
 
 ## Verification — personal.25 (candidate, not installed yet)
 
